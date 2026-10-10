@@ -73,6 +73,13 @@ spec:
             - name: GEMINI_API_KEY
               valueFrom:
                 secretKeyRef: { name: gateway, key: llm-api-key, optional: true }
+            {{- if .Values.provisioner.enabled }}
+            - name: INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef: { name: gateway, key: internal-token }
+            - name: MAX_STORES_PER_USER
+              value: {{ .Values.provisioner.maxStoresPerUser | quote }}
+            {{- end }}
             - name: UPSTREAM_ALLOWED_HOSTS
               value: {{ join "," .Values.gateway.upstreamAllowedHosts | quote }}
             - name: UPSTREAM_TIMEOUT_MS

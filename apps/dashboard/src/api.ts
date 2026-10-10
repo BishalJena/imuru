@@ -69,6 +69,17 @@ export interface PolicyRule {
   created_at: string;
 }
 
+export interface Store {
+  id: string;
+  slug: string;
+  owner_email?: string;
+  desired: "present" | "absent";
+  status: "provisioning" | "ready" | "failed" | "deleting";
+  reason: string | null;
+  url: string | null;
+  created_at: string;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -136,6 +147,10 @@ export const api = {
   addPolicy: (r: { role: Role; server_slug: string; tool_pattern: string }) =>
     request<PolicyRule>("POST", "/policies", r),
   removePolicy: (id: string) => request<void>("DELETE", `/policies/${id}`),
+
+  stores: () => request<Store[]>("GET", "/stores"),
+  createStore: (slug: string) => request<Store>("POST", "/stores", { slug }),
+  deleteStore: (id: string) => request<Store>("DELETE", `/stores/${id}`),
 
   audit: (q: Record<string, string>) =>
     request<AuditRow[]>("GET", `/audit?${new URLSearchParams(q).toString()}`),

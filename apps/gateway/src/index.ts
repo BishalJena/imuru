@@ -10,6 +10,7 @@ import { Registry } from "./registry.js";
 import { Repo } from "./repo.js";
 import { ServerService, type SeedServer } from "./servers.js";
 import { UrlGuard } from "./ssrf.js";
+import { StoreService } from "./stores.js";
 
 const config = loadConfig();
 const db = createPool(config.DATABASE_URL);
@@ -77,7 +78,18 @@ if (!provider) console.warn("chat agent disabled: no LLM API key configured");
 let notifyToolsChanged = () => {};
 const policies = new Policies(db, () => notifyToolsChanged());
 await policies.load();
-const app = createApp({ config, registry, repo, servers, signer, urlGuard, provider, policies });
+const stores = new StoreService(db, config.MAX_STORES_PER_USER);
+const app = createApp({
+  config,
+  registry,
+  repo,
+  servers,
+  signer,
+  urlGuard,
+  provider,
+  policies,
+  stores,
+});
 notifyToolsChanged = app.locals.notifyToolsChanged as () => void;
 
 const server = app.listen(config.PORT, "0.0.0.0", () => {

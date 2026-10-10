@@ -51,6 +51,9 @@ const schema = z.object({
   LLM_PROVIDER: z.enum(["gemini", "none"]).default("gemini"),
   LLM_MODEL: z.string().default("gemini-flash-latest"),
   GEMINI_API_KEY: z.string().optional(),
+  // Shared with the provisioner; enables /internal and the stores API when set.
+  INTERNAL_TOKEN: z.string().min(32).optional(),
+  MAX_STORES_PER_USER: z.coerce.number().int().min(0).default(2),
   CHAT_MAX_STEPS: z.coerce.number().int().min(1).max(20).default(8),
 });
 

@@ -9,6 +9,7 @@ import { Registry } from "../src/registry.js";
 import { Repo } from "../src/repo.js";
 import { ServerService } from "../src/servers.js";
 import { UrlGuard } from "../src/ssrf.js";
+import { StoreService } from "../src/stores.js";
 import type { LlmProvider } from "../src/llm.js";
 import { Policies } from "../src/policies.js";
 import { listen } from "./helpers.js";
@@ -50,6 +51,8 @@ export async function startGateway(
     LLM_PROVIDER: "none",
     LLM_MODEL: "test",
     CHAT_MAX_STEPS: 8,
+    INTERNAL_TOKEN: "i".repeat(40),
+    MAX_STORES_PER_USER: 2,
   };
   const repo = new Repo(db);
   await repo.ensureAdmin(ADMIN.email, "Admin", ADMIN.password);
@@ -61,7 +64,9 @@ export async function startGateway(
   let notify = () => {};
   const policies = new Policies(db, () => notify());
   await policies.load();
+  const stores = new StoreService(db, config.MAX_STORES_PER_USER);
   const app = createApp({
+    stores,
     policies,
     config,
     registry,
@@ -102,6 +107,8 @@ export async function startGateway(
     servers,
     sealer,
     policies,
+    stores,
+    internalToken: config.INTERNAL_TOKEN!,
     signer,
     login,
     async stop() {

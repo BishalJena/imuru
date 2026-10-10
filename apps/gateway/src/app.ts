@@ -5,6 +5,8 @@ import { chatRouter } from "./chat-route.js";
 import type { LlmProvider } from "./llm.js";
 import type { Policies } from "./policies.js";
 import { policyRouter } from "./policy-route.js";
+import type { StoreService } from "./stores.js";
+import { internalRouter, storesRouter } from "./stores-route.js";
 import { mcpAuth, type Principal } from "./auth.js";
 import type { Config } from "./config.js";
 import type { TokenSigner } from "./crypto.js";
@@ -23,6 +25,7 @@ export interface AppDeps {
   urlGuard: UrlGuard;
   isAllowed?: (principal: Principal, server: string, tool: string) => boolean;
   policies?: Policies;
+  stores?: StoreService;
   provider?: LlmProvider | null;
   extraApi?: (app: Express) => void;
 }
@@ -87,6 +90,10 @@ export function createApp(deps: AppDeps): Express {
     }),
   );
   if (deps.policies) app.use("/api/policies", policyRouter(repo, deps.policies));
+  if (deps.stores && config.INTERNAL_TOKEN) {
+    app.use("/api/stores", storesRouter(repo, deps.stores));
+    app.use("/internal", internalRouter(config.INTERNAL_TOKEN, deps.stores, deps.servers));
+  }
   deps.extraApi?.(app);
   app.use(
     "/api",

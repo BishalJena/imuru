@@ -39,6 +39,25 @@ dashboard:
     requests: { cpu: 10m, memory: 16Mi }
     limits: { cpu: 200m, memory: 64Mi }
 
+# Multi-store provisioning: users create and delete stores from the dashboard.
+provisioner:
+  enabled: true
+  image:
+    repository: urumi/provisioner
+    tag: dev
+    pullPolicy: IfNotPresent
+  maxStoresPerUser: 2
+  hostSuffix: "-shop"
+  helmTimeout: 10m
+  concurrency: 3
+  # woo-mcp image used for each provisioned store.
+  wooMcpImage:
+    repository: urumi/woo-mcp
+    tag: dev
+  resources:
+    requests: { cpu: 25m, memory: 96Mi }
+    limits: { cpu: "1", memory: 384Mi }
+
 llm:
   provider: gemini
   model: gemini-flash-latest
@@ -65,6 +84,7 @@ networkPolicy:
     podLabels:
       app.kubernetes.io/name: traefik
   # Namespaces the gateway may open connections to for in-cluster upstreams.
+  # Provisioned stores are matched by their urumi.io/store label instead.
   upstreamNamespaces: [store, demo-upstreams]
   privateCidrs: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16]
 

@@ -22,14 +22,15 @@ flowchart LR
   WM -->|REST API, OAuth 1.0a| W --> M[(MariaDB)]
 ```
 
-| Namespace        | Component           | Responsibility                                                                                                                  |
-| ---------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `store`          | WordPress + MariaDB | The shop. Database and `wp-content` on PVCs. A bootstrap Job installs WooCommerce, enables Cash on Delivery and seeds products. |
-| `store`          | `woo-mcp`           | MCP server (Streamable HTTP) exposing products and orders as tools. ClusterIP only, reachable only from the gateway.            |
-| `platform`       | `gateway`           | Dashboard API, upstream registry, aggregated `/mcp` endpoint, audit log, tool permissions, chat agent.                          |
-| `platform`       | `dashboard`         | React SPA served by nginx.                                                                                                      |
-| `platform`       | Postgres            | Users, API keys, servers (encrypted credentials), audit log.                                                                    |
-| `demo-upstreams` | `everything`        | The MCP reference server, registered twice to demonstrate tool-name collisions.                                                 |
+| Namespace        | Component           | Responsibility                                                                                                                                        |
+| ---------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `store`          | WordPress + MariaDB | The shop. Database and `wp-content` on PVCs. A bootstrap Job installs WooCommerce, enables Cash on Delivery and seeds products.                       |
+| `store`          | `woo-mcp`           | MCP server (Streamable HTTP) exposing products and orders as tools. ClusterIP only, reachable only from the gateway.                                  |
+| `platform`       | `gateway`           | Dashboard API, upstream registry, aggregated `/mcp` endpoint, audit log, tool permissions, chat agent.                                                |
+| `platform`       | `dashboard`         | React SPA served by nginx.                                                                                                                            |
+| `platform`       | Postgres            | Users, API keys, servers (encrypted credentials), audit log.                                                                                          |
+| `demo-upstreams` | `everything`        | The MCP reference server, registered twice to demonstrate tool-name collisions.                                                                       |
+| `platform`       | `provisioner`       | Creates and deletes additional stores from the dashboard (Helm releases in `store-<name>` namespaces). The only component with Kubernetes API access. |
 
 Design and tradeoffs: [`docs/DESIGN.md`](docs/DESIGN.md). Threat model: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
@@ -121,6 +122,24 @@ The client sees every enabled server's tools as `<server>__<tool>`, for example 
 
 Open **Chat** in the dashboard and ask, for example, "Create a product called Demo Hoodie priced at 999", then "What orders came in today?". Every tool call appears as a card with its arguments, result and duration. The agent calls tools through the gateway's own `/mcp` endpoint as the logged-in user, so its calls appear in the audit log under that user with `via = chat`.
 
+### Create more stores (multi-store)
+
+Open **Stores**, enter a name, and press **Create store**.
+
+- The provisioner installs a complete store (WordPress, MariaDB, bootstrap Job, woo-mcp) as Helm release `store-<name>` in its own namespace, with a ResourceQuota and LimitRange.
+- The store gets its own host: `http://<name>-shop.127.0.0.1.nip.io`.
+- Once it is ready, its MCP server is registered in the gateway automatically, with tools named `store-<name>__list_orders` and so on.
+- **Delete** removes the MCP registration, the release and the namespace, including the store's volumes and Secrets.
+- Each user may own up to `provisioner.maxStoresPerUser` stores (default 2).
+- A failed store can be retried.
+
+`make e2e-stores` runs the whole flow:
+
+1. Creates two stores in parallel.
+2. Checks that both are ready and registered.
+3. Checks cross-store isolation, the guardrails and the provisioner's permission limits.
+4. Deletes one store and checks that its tools and namespace are gone.
+
 ### Manage servers
 
 On **Servers**, admins see each server's status (Connected / Unreachable / Disabled), last error and tools, and can add, edit, disable or remove servers. A server needs a Streamable HTTP URL and an optional credential (bearer token or custom header). Credentials are write-only.
@@ -178,13 +197,14 @@ scripts/upgrade-rollback.sh       # scripted rehearsal: values change, verify, r
 
 Stand-out items from the brief:
 
-| Item                                                                                                                                                                                 | Where                                                                                       |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| Tool permissions per role: hidden from the tool list, rejected and audited when called directly                                                                                      | `apps/gateway/src/policies.ts`, dashboard **Permissions** page                              |
-| Security hardening: SSRF guard, default-deny ingress and egress NetworkPolicies everywhere, non-root read-only containers, encrypted upstream credentials, no service-account tokens | `apps/gateway/src/ssrf.ts`, `charts/*/templates/networkpolicy.yaml`, `docs/THREAT_MODEL.md` |
-| Production-like VPS deployment with TLS                                                                                                                                              | `values-prod.yaml`, `scripts/vps/`, `make push` / `make deploy-prod`                        |
-| Upgrades and rollback                                                                                                                                                                | `scripts/upgrade-rollback.sh`, section above                                                |
-| Clear reporting of why an upstream is unreachable or a call failed                                                                                                                   | Servers page `last_error`, audit log outcome and error text                                 |
+| Item                                                                                                                                                                                                                                                                                                                       | Where                                                                                                                |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Tool permissions per role: hidden from the tool list, rejected and audited when called directly                                                                                                                                                                                                                            | `apps/gateway/src/policies.ts`, dashboard **Permissions** page                                                       |
+| Security hardening: SSRF guard, default-deny ingress and egress NetworkPolicies everywhere, non-root read-only containers, encrypted upstream credentials, no service-account tokens                                                                                                                                       | `apps/gateway/src/ssrf.ts`, `charts/*/templates/networkpolicy.yaml`, `docs/THREAT_MODEL.md`                          |
+| Production-like VPS deployment with TLS                                                                                                                                                                                                                                                                                    | `values-prod.yaml`, `scripts/vps/`, `make push` / `make deploy-prod`                                                 |
+| Upgrades and rollback                                                                                                                                                                                                                                                                                                      | `scripts/upgrade-rollback.sh`, section above                                                                         |
+| **Bonus: multi-store provisioning.** Create/delete from the dashboard, a namespace, database, volumes and host per store, automatic MCP registration, NetworkPolicy isolation, ResourceQuota/LimitRange, max stores per user, safe retries and restarts, least-privilege RBAC plus an admission policy for the provisioner | `apps/provisioner`, `charts/platform/templates/provisioner.yaml`, dashboard **Stores** page, `scripts/e2e-stores.sh` |
+| Clear reporting of why an upstream is unreachable or a call failed                                                                                                                                                                                                                                                         | Servers page `last_error`, audit log outcome and error text                                                          |
 
 ## Development
 

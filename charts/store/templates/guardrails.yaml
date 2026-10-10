@@ -1,0 +1,20 @@
+{{- if .Values.guardrails.enabled }}
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: store-quota
+  labels: {{- include "store.labels" (dict "ctx" $ "component" "guardrails") | nindent 4 }}
+spec:
+  hard: {{- toYaml .Values.guardrails.quota | nindent 4 }}
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: store-limits
+  labels: {{- include "store.labels" (dict "ctx" $ "component" "guardrails") | nindent 4 }}
+spec:
+  limits:
+    - type: Container
+      defaultRequest: {{- toYaml .Values.guardrails.defaultRequest | nindent 8 }}
+      default: {{- toYaml .Values.guardrails.defaultLimit | nindent 8 }}
+{{- end }}

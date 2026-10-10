@@ -2,7 +2,8 @@
 **/dist
 **/coverage
 .git
-charts
+charts/platform
+charts/demo-upstreams
 docs
 scripts
 notes

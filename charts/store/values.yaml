@@ -89,3 +89,19 @@ networkPolicy:
     namespace: platform
     podLabels:
       app.kubernetes.io/name: gateway
+
+# Per-namespace limits for provisioned stores (the provisioner turns these on).
+guardrails:
+  enabled: false
+  quota:
+    requests.cpu: "1"
+    requests.memory: 2Gi
+    limits.cpu: "6"
+    limits.memory: 4Gi
+    requests.storage: 10Gi
+    persistentvolumeclaims: "4"
+    pods: "10"
+    services: "6"
+  # Applied to any container that does not set its own requests/limits.
+  defaultRequest: { cpu: 50m, memory: 64Mi }
+  defaultLimit: { cpu: 500m, memory: 256Mi }

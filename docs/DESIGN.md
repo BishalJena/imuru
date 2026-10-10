@@ -149,6 +149,38 @@ Readiness never depends on another service's health. woo-mcp stays ready when Wo
 
 Every call made by the agent goes through the same authentication, permission checks and audit path as an external client, so it appears in the audit log under the user with `via = chat`. The system prompt tells the model to treat tool descriptions and results as untrusted data. The step cap bounds runaway loops.
 
+## Multi-store provisioning
+
+```mermaid
+flowchart LR
+  U[Dashboard] -->|POST /api/stores| G[gateway]
+  G --> DB[(stores table: desired state)]
+  P[provisioner] -->|GET /internal/stores| G
+  P -->|create namespace + RoleBinding| K[Kubernetes API]
+  P -->|helm upgrade --install store-x| K
+  P -->|PUT /internal/servers/store-x| G
+  G -->|MCP| WM[woo-mcp in store-x]
+```
+
+- **Desired state and a reconcile loop.**
+  - The gateway records what should exist: a `stores` row with `desired=present|absent`.
+  - The provisioner polls the gateway's internal API every 5 seconds and drives each store toward its desired state, up to 3 at a time.
+  - Every step is idempotent: create the namespace, bind the role, `helm upgrade --install`, read the woo-mcp token, register the upstream, report `ready`.
+  - If the provisioner restarts mid-way, the next pod picks up the `provisioning` rows and completes them, or marks them `failed` with Helm's error as the reason.
+  - Helm's `--wait --timeout` is the provisioning timeout.
+  - Creating an existing store returns it, and creating a failed one re-queues it, so creating is safe to retry.
+- **Separation of privileges.** The gateway owns the database and has no Kubernetes permissions. The provisioner has Kubernetes permissions and no database access. It talks to the gateway through `/internal`, which:
+  - is not routed by the Ingress,
+  - accepts connections only from the provisioner pod (NetworkPolicy),
+  - requires a shared token from a Secret.
+- **Least-privilege RBAC.**
+  - Cluster-wide, the provisioner may only create and delete namespaces and RoleBindings, and `bind` the `urumi-store-manager` ClusterRole.
+  - It gets the permissions to manage a store (Secrets, workloads, PVCs, Ingress, NetworkPolicies, quota) only through a RoleBinding it creates inside each `store-<name>` namespace. So it can never read the `platform` Secrets.
+  - A `ValidatingAdmissionPolicy` adds a check RBAC cannot express. The provisioner's namespace and RoleBinding writes must target `store-*` names, carry the `urumi.io/store` label, and bind only the store role. This prevents it from binding itself into `platform` or `kube-system`. `scripts/e2e-stores.sh` verifies each of these limits.
+- **Isolation.** Each store runs the same chart with the same NetworkPolicies: woo-mcp reaches only its own WordPress, and MariaDB accepts only its own pods. The gateway's egress allows namespaces labelled `urumi.io/store`.
+- **Guardrails.** Each namespace gets a ResourceQuota (CPU, memory, storage, PVC, pod and service counts) and a LimitRange. Each user has a store limit, enforced in a transaction with a per-user advisory lock, so parallel requests cannot exceed it.
+- **Teardown.** Deregister the upstream first, so its tools vanish from clients before the backend does. Then `helm uninstall`, then delete the namespace, which removes the PVCs, the kept Secrets and the RoleBinding. The row is purged once the namespace is gone.
+
 ## What changes for production
 
 All differences are Helm values; the templates are the same.

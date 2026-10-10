@@ -7,12 +7,14 @@ import { KeysPage } from "./pages/Keys.js";
 import { LoginPage } from "./pages/Login.js";
 import { PermissionsPage } from "./pages/Permissions.js";
 import { ServersPage } from "./pages/Servers.js";
+import { StoresPage } from "./pages/Stores.js";
 import { TeamPage } from "./pages/Team.js";
 import { navigate, usePath } from "./router.js";
 
 const NAV: { path: string; label: string; adminOnly?: boolean }[] = [
   { path: "/servers", label: "Servers" },
   { path: "/chat", label: "Chat" },
+  { path: "/stores", label: "Stores" },
   { path: "/keys", label: "My API keys" },
   { path: "/team", label: "Team", adminOnly: true },
   { path: "/permissions", label: "Permissions", adminOnly: true },
@@ -83,6 +85,7 @@ export function App() {
       <main className="content">
         {page === "/servers" && <ServersPage me={me} />}
         {page === "/chat" && <ChatPage me={me} />}
+        {page === "/stores" && <StoresPage me={me} />}
         {page === "/keys" && <KeysPage />}
         {page === "/team" && <TeamPage me={me} />}
         {page === "/permissions" && <PermissionsPage />}
