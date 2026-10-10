@@ -35,7 +35,7 @@ describe("Sealer", () => {
     const a = s.seal("token");
     expect(s.seal("token").equals(a)).toBe(false);
     expect(s.open(a)).toBe("token");
-    a[a.length - 1] ^= 1;
+    a.writeUInt8(a.readUInt8(a.length - 1) ^ 1, a.length - 1);
     expect(() => s.open(a)).toThrow();
     expect(() => new Sealer("other".repeat(10)).open(s.seal("x"))).toThrow();
   });
