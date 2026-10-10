@@ -1,15 +1,24 @@
 {{- if .Values.networkPolicy.enabled }}
 {{- $np := .Values.networkPolicy }}
-# Deny all ingress to every pod in the namespace; the policies below open only
-# the paths the store needs.
+# Deny all ingress and egress for every pod in the namespace; the policies
+# below open only the paths the store needs. DNS is allowed for everyone.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: default-deny-ingress
+  name: default-deny
   labels: {{- include "store.labels" (dict "ctx" $ "component" "network") | nindent 4 }}
 spec:
   podSelector: {}
-  policyTypes: [Ingress]
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -19,7 +28,21 @@ metadata:
 spec:
   podSelector:
     matchLabels: {{- include "store.selectorLabels" (dict "ctx" $ "component" "wordpress") | nindent 6 }}
-  policyTypes: [Ingress]
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {{- include "store.selectorLabels" (dict "ctx" $ "component" "mariadb") | nindent 14 }}
+      ports:
+        - port: 3306
+    # wordpress.org for core/plugin update checks.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: {{- toYaml $np.privateCidrs | nindent 14 }}
+      ports:
+        - port: 443
+        - port: 80
   ingress:
     - from:
         - namespaceSelector:
@@ -49,6 +72,30 @@ spec:
             matchLabels: {{- include "store.selectorLabels" (dict "ctx" $ "component" "bootstrap") | nindent 14 }}
       ports:
         - port: mysql
+---
+# The bootstrap Job: database, and wordpress.org to download WooCommerce.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bootstrap
+  labels: {{- include "store.labels" (dict "ctx" $ "component" "bootstrap") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "store.selectorLabels" (dict "ctx" $ "component" "bootstrap") | nindent 6 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {{- include "store.selectorLabels" (dict "ctx" $ "component" "mariadb") | nindent 14 }}
+      ports:
+        - port: 3306
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: {{- toYaml $np.privateCidrs | nindent 14 }}
+      ports:
+        - port: 443
+        - port: 80
 {{- if .Values.wooMcp.enabled }}
 ---
 # woo-mcp is reachable only from gateway pods in the platform namespace. Both
@@ -61,7 +108,13 @@ metadata:
 spec:
   podSelector:
     matchLabels: {{- include "store.selectorLabels" (dict "ctx" $ "component" "woo-mcp") | nindent 6 }}
-  policyTypes: [Ingress]
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {{- include "store.selectorLabels" (dict "ctx" $ "component" "wordpress") | nindent 14 }}
+      ports:
+        - port: 80
   ingress:
     - from:
         - namespaceSelector:

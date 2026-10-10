@@ -1,0 +1,97 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+# Deny all ingress and egress in the namespace, then open each path explicitly.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  labels: {{- include "platform.labels" (dict "ctx" $ "component" "network") | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway
+  labels: {{- include "platform.labels" (dict "ctx" $ "component" "gateway") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "platform.selectorLabels" (dict "ctx" $ "component" "gateway") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $np.ingressController.namespace }}
+          podSelector:
+            matchLabels: {{- toYaml $np.ingressController.podLabels | nindent 14 }}
+      ports:
+        - port: http
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {{- include "platform.selectorLabels" (dict "ctx" $ "component" "postgres") | nindent 14 }}
+      ports:
+        - port: 5432
+    # In-cluster upstreams live only in these namespaces. An admin-added URL
+    # pointing anywhere else inside the cluster is blocked here too, behind the
+    # gateway's own SSRF guard.
+    - to:
+        {{- range $np.upstreamNamespaces }}
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ . }} }
+        {{- end }}
+    # Remote MCP servers and the LLM API: public addresses only.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: {{- toYaml $np.privateCidrs | nindent 14 }}
+      ports:
+        - port: 443
+        - port: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dashboard
+  labels: {{- include "platform.labels" (dict "ctx" $ "component" "dashboard") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "platform.selectorLabels" (dict "ctx" $ "component" "dashboard") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $np.ingressController.namespace }}
+          podSelector:
+            matchLabels: {{- toYaml $np.ingressController.podLabels | nindent 14 }}
+      ports:
+        - port: http
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres
+  labels: {{- include "platform.labels" (dict "ctx" $ "component" "postgres") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "platform.selectorLabels" (dict "ctx" $ "component" "postgres") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "platform.selectorLabels" (dict "ctx" $ "component" "gateway") | nindent 14 }}
+      ports:
+        - port: 5432
+{{- end }}

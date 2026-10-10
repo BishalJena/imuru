@@ -65,10 +65,11 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: default-deny-ingress
+  name: default-deny
 spec:
+  # The demo server needs no network access of its own: no egress at all.
   podSelector: {}
-  policyTypes: [Ingress]
+  policyTypes: [Ingress, Egress]
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

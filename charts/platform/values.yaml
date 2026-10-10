@@ -58,6 +58,16 @@ postgres:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: "1", memory: 512Mi }
 
+networkPolicy:
+  enabled: true
+  ingressController:
+    namespace: kube-system
+    podLabels:
+      app.kubernetes.io/name: traefik
+  # Namespaces the gateway may open connections to for in-cluster upstreams.
+  upstreamNamespaces: [store, demo-upstreams]
+  privateCidrs: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16]
+
 # Render even if an upstream's source Secret is missing (lint, template). Never set on a real install.
 allowMissingUpstreamSecrets: false
 

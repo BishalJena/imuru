@@ -76,6 +76,9 @@ wooMcp:
 
 networkPolicy:
   enabled: true
+  # CIDRs treated as "internal" when allowing internet egress (cluster, node and
+  # cloud-metadata ranges). Internet egress = 0.0.0.0/0 minus these.
+  privateCidrs: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16]
   # Who may reach the storefront: the Ingress controller.
   ingressController:
     namespace: kube-system

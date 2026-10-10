@@ -234,6 +234,23 @@ echo "isolation"
 [[ "$(tcp_from default "mariadb.$STORE_NS.svc" 3306)" == blocked ]] && ok "mariadb unreachable from namespace default" || ko "mariadb unreachable from namespace default"
 [[ "$(tcp_from default "wordpress.$STORE_NS.svc" 80)" == blocked ]] && ok "wordpress reachable only via the Ingress" || ko "wordpress reachable only via the Ingress"
 
+# tcp_in <namespace> <deployment> <host> <port>: TCP connect from inside an app pod (node is in both images).
+tcp_in() {
+  kubectl -n "$1" exec "deploy/$2" -- node -e "
+    const s = require('net').connect({ host: '$3', port: $4, timeout: 4000 });
+    s.on('connect', () => { console.log('open'); process.exit(0); });
+    s.on('timeout', () => { console.log('blocked'); process.exit(0); });
+    s.on('error', () => { console.log('blocked'); process.exit(0); });" 2>/dev/null
+}
+
+echo
+echo "egress"
+[[ "$(tcp_in "$PLATFORM_NS" gateway postgres 5432)" == open ]] && ok "gateway reaches postgres (control)" || ko "gateway reaches postgres (control)"
+[[ "$(tcp_in "$PLATFORM_NS" gateway kubernetes.default.svc 443)" == blocked ]] && ok "gateway cannot reach the Kubernetes API" || ko "gateway cannot reach the Kubernetes API"
+[[ "$(tcp_in "$STORE_NS" woo-mcp wordpress 80)" == open ]] && ok "woo-mcp reaches wordpress (control)" || ko "woo-mcp reaches wordpress (control)"
+[[ "$(tcp_in "$STORE_NS" woo-mcp 1.1.1.1 443)" == blocked ]] && ok "woo-mcp has no internet egress" || ko "woo-mcp has no internet egress"
+[[ "$(tcp_in "$STORE_NS" woo-mcp "mariadb" 3306)" == blocked ]] && ok "woo-mcp cannot reach mariadb" || ko "woo-mcp cannot reach mariadb"
+
 echo
 echo "$pass passed, $fail failed"
 [[ "$fail" -eq 0 ]]
