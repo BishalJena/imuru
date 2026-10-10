@@ -40,7 +40,7 @@ export async function migrate(db: Db, dir: string): Promise<string[]> {
         applied.push(file);
       } catch (err) {
         await client.query("ROLLBACK");
-        throw new Error(`migration ${file} failed: ${(err as Error).message}`);
+        throw new Error(`migration ${file} failed: ${(err as Error).message}`, { cause: err });
       }
     }
   } finally {
