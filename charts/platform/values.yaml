@@ -30,9 +30,18 @@ gateway:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: 500m, memory: 384Mi }
 
+dashboard:
+  image:
+    repository: urumi/dashboard
+    tag: dev
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits: { cpu: 200m, memory: 64Mi }
+
 llm:
   provider: gemini
-  model: gemini-2.5-flash
+  model: gemini-flash-latest
   maxSteps: 8
   # Supply via --set llm.apiKey=... or a gitignored values-secrets file. Kept in
   # Secret platform/gateway; an empty value keeps whatever the Secret holds.

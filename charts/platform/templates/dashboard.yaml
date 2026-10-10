@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard
+  labels: {{- include "platform.labels" (dict "ctx" $ "component" "dashboard") | nindent 4 }}
+spec:
+  selector: {{- include "platform.selectorLabels" (dict "ctx" $ "component" "dashboard") | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  labels: {{- include "platform.labels" (dict "ctx" $ "component" "dashboard") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "platform.selectorLabels" (dict "ctx" $ "component" "dashboard") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "platform.labels" (dict "ctx" $ "component" "dashboard") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: dashboard
+          image: "{{ .Values.dashboard.image.repository }}:{{ .Values.dashboard.image.tag }}"
+          imagePullPolicy: {{ .Values.dashboard.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 20
+          resources: {{- toYaml .Values.dashboard.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          # nginx needs writable cache and pid locations with a read-only root.
+          volumeMounts:
+            - { name: cache, mountPath: /var/cache/nginx }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: cache, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }

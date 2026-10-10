@@ -9,13 +9,17 @@ import { Registry } from "../src/registry.js";
 import { Repo } from "../src/repo.js";
 import { ServerService } from "../src/servers.js";
 import { UrlGuard } from "../src/ssrf.js";
+import type { LlmProvider } from "../src/llm.js";
 import { listen } from "./helpers.js";
 
 export const ADMIN = { email: "admin@test.dev", password: "admin-password-1" };
 
 /** A gateway on a random port backed by a fresh Postgres schema. */
 export async function startGateway(
-  opts: { isAllowed?: (p: Principal, s: string, t: string) => boolean } = {},
+  opts: {
+    isAllowed?: (p: Principal, s: string, t: string) => boolean;
+    provider?: LlmProvider;
+  } = {},
 ) {
   const schema = `t_${Math.random().toString(36).slice(2, 10)}`;
   const base = inject("databaseUrl");
@@ -61,8 +65,10 @@ export async function startGateway(
     signer,
     urlGuard,
     ...(opts.isAllowed ? { isAllowed: opts.isAllowed } : {}),
+    ...(opts.provider ? { provider: opts.provider } : {}),
   });
   const { server, url } = await listen(app);
+  config.SELF_MCP_URL = `${url}/mcp`;
 
   /** Logged-in fetch for the dashboard API. */
   const login = async (email: string, password: string) => {

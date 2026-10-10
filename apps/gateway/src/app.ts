@@ -1,6 +1,8 @@
 import { createMcpExpressApp } from "@modelcontextprotocol/express";
 import type { Express, NextFunction, Request, Response } from "express";
 import { apiRouter } from "./api.js";
+import { chatRouter } from "./chat-route.js";
+import type { LlmProvider } from "./llm.js";
 import { mcpAuth, type Principal } from "./auth.js";
 import type { Config } from "./config.js";
 import type { TokenSigner } from "./crypto.js";
@@ -18,6 +20,7 @@ export interface AppDeps {
   signer: TokenSigner;
   urlGuard: UrlGuard;
   isAllowed?: (principal: Principal, server: string, tool: string) => boolean;
+  provider?: LlmProvider | null;
   extraApi?: (app: Express) => void;
 }
 
@@ -66,6 +69,16 @@ export function createApp(deps: AppDeps): Express {
   app.locals.notifyToolsChanged = mcp.notifyAll;
   app.use("/mcp", mcpAuth(repo, deps.signer), mcp);
 
+  app.use(
+    "/api/chat",
+    chatRouter({
+      repo,
+      signer: deps.signer,
+      provider: deps.provider ?? null,
+      mcpUrl: () => config.SELF_MCP_URL,
+      maxSteps: config.CHAT_MAX_STEPS,
+    }),
+  );
   deps.extraApi?.(app);
   app.use(
     "/api",

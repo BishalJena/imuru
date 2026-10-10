@@ -6,6 +6,7 @@ HELM_TIMEOUT := 15m
 src_hash = $(shell cat $$(git ls-files -co --exclude-standard $(1) pnpm-lock.yaml tsconfig.base.json | sort) | shasum | cut -c1-12)
 WOO_MCP_TAG := $(call src_hash,apps/woo-mcp)
 GATEWAY_TAG := $(call src_hash,apps/gateway)
+DASHBOARD_TAG := $(call src_hash,apps/dashboard)
 EVERYTHING_TAG := 2026.8.31
 
 .PHONY: help install typecheck lint test check cluster-up cluster-down deploy-store deploy-upstreams deploy-platform deploy-local helm-lint e2e images
@@ -42,8 +43,9 @@ helm-lint: ## Lint every chart with its local values
 images: ## Build app images and import them into the k3d cluster
 	docker build -f apps/woo-mcp/Dockerfile -t urumi/woo-mcp:$(WOO_MCP_TAG) .
 	docker build -f apps/gateway/Dockerfile -t urumi/gateway:$(GATEWAY_TAG) .
+	docker build -f apps/dashboard/Dockerfile -t urumi/dashboard:$(DASHBOARD_TAG) .
 	docker build -f images/everything/Dockerfile -t urumi/everything:$(EVERYTHING_TAG) images/everything
-	k3d image import -c $(CLUSTER) urumi/woo-mcp:$(WOO_MCP_TAG) urumi/gateway:$(GATEWAY_TAG) urumi/everything:$(EVERYTHING_TAG)
+	k3d image import -c $(CLUSTER) urumi/woo-mcp:$(WOO_MCP_TAG) urumi/gateway:$(GATEWAY_TAG) urumi/dashboard:$(DASHBOARD_TAG) urumi/everything:$(EVERYTHING_TAG)
 
 deploy-store: ## Install or upgrade the store release (namespace store)
 	helm upgrade --install store charts/store -n store --create-namespace \
@@ -60,7 +62,7 @@ PLATFORM_SECRETS := $(wildcard charts/platform/values-secrets.local.yaml)
 deploy-platform: ## Install or upgrade the platform release (namespace platform)
 	helm upgrade --install platform charts/platform -n platform --create-namespace \
 		-f charts/platform/values-local.yaml $(if $(PLATFORM_SECRETS),-f $(PLATFORM_SECRETS)) \
-		--set gateway.image.tag=$(GATEWAY_TAG) --wait --timeout $(HELM_TIMEOUT)
+		--set gateway.image.tag=$(GATEWAY_TAG) --set dashboard.image.tag=$(DASHBOARD_TAG) --wait --timeout $(HELM_TIMEOUT)
 
 deploy-local: images deploy-store deploy-upstreams deploy-platform ## Build images and deploy everything to the local cluster
 

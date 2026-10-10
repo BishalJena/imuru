@@ -1,0 +1,379 @@
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --text: #16181d;
+  --muted: #646b78;
+  --border: #e2e5ea;
+  --accent: #2f5bea;
+  --accent-text: #ffffff;
+  --ok: #157f3c;
+  --ok-bg: #e5f5ea;
+  --bad: #b42318;
+  --bad-bg: #fde8e6;
+  --idle: #6b7280;
+  --idle-bg: #eef0f3;
+  --code-bg: #f1f3f6;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--bg);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --text: #e7e9ee;
+    --muted: #9aa2b1;
+    --border: #272c36;
+    --accent: #6d8dff;
+    --accent-text: #0f1115;
+    --ok: #4ade80;
+    --ok-bg: #12301f;
+    --bad: #f87171;
+    --bad-bg: #3a1513;
+    --idle: #9aa2b1;
+    --idle-bg: #232833;
+    --code-bg: #1f232c;
+  }
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+}
+h1 {
+  font-size: 20px;
+  margin: 0 0 16px;
+}
+h2 {
+  font-size: 20px;
+  margin: 0;
+}
+h3 {
+  font-size: 15px;
+  margin: 0;
+}
+code,
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+}
+pre {
+  background: var(--code-bg);
+  padding: 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 6px 0;
+}
+.muted {
+  color: var(--muted);
+}
+.small {
+  font-size: 12px;
+}
+.error {
+  color: var(--bad);
+}
+.center {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+button {
+  background: var(--accent);
+  color: var(--accent-text);
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+button.secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+button.danger {
+  background: transparent;
+  color: var(--bad);
+  border: 1px solid var(--border);
+}
+button.small {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+button.link {
+  background: none;
+  color: var(--accent);
+  padding: 0;
+}
+input,
+select {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+label {
+  display: grid;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+label input,
+label select {
+  color: var(--text);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+}
+.sidebar {
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 20px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.brand {
+  font-weight: 700;
+  font-size: 16px;
+}
+.brand span {
+  font-weight: 400;
+  color: var(--muted);
+}
+nav {
+  display: grid;
+  gap: 2px;
+}
+nav a {
+  color: var(--text);
+  text-decoration: none;
+  padding: 8px 10px;
+  border-radius: 6px;
+}
+nav a.active,
+nav a:hover {
+  background: var(--code-bg);
+}
+.whoami {
+  margin-top: auto;
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+.content {
+  padding: 28px 32px;
+  max-width: 1100px;
+  width: 100%;
+}
+.page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+.cards {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+.auth {
+  width: 100%;
+  max-width: 360px;
+  display: grid;
+  gap: 12px;
+}
+.form {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0;
+}
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.server {
+  display: grid;
+  gap: 8px;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.inline {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.reveal {
+  margin: 12px 0;
+  display: grid;
+  gap: 6px;
+  border-color: var(--accent);
+}
+.tools {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: grid;
+  gap: 6px;
+}
+.tools li {
+  display: grid;
+  gap: 2px;
+}
+details summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.badge {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.badge.connected {
+  color: var(--ok);
+  background: var(--ok-bg);
+}
+.badge.unreachable {
+  color: var(--bad);
+  background: var(--bad-bg);
+}
+.badge.disabled {
+  color: var(--idle);
+  background: var(--idle-bg);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+th,
+td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+th {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 500;
+}
+tr.dim td {
+  opacity: 0.55;
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 56px);
+}
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 0;
+}
+.bubble {
+  max-width: 75%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+.bubble.user {
+  align-self: flex-end;
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.bubble.assistant {
+  align-self: flex-start;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+.bubble.error {
+  align-self: flex-start;
+  color: var(--bad);
+}
+.toolcall {
+  align-self: flex-start;
+  max-width: 75%;
+  background: var(--code-bg);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.toolcall.err summary .mono {
+  color: var(--bad);
+}
+.composer {
+  display: flex;
+  gap: 8px;
+}
+.composer input {
+  flex: 1;
+}
+
+@media (max-width: 760px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .content {
+    padding: 16px;
+  }
+  .grid2 {
+    grid-template-columns: 1fr;
+  }
+}

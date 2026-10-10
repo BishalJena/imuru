@@ -32,3 +32,6 @@ charts/**/charts/*.tgz
 .idea/
 .vscode/
 *.log
+
+# Browser automation output
+.playwright-mcp/

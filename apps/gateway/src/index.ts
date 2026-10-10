@@ -4,6 +4,7 @@ import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { Sealer, TokenSigner } from "./crypto.js";
 import { createPool, migrate } from "./db.js";
+import { GeminiProvider } from "./llm.js";
 import { Registry } from "./registry.js";
 import { Repo } from "./repo.js";
 import { ServerService, type SeedServer } from "./servers.js";
@@ -66,7 +67,12 @@ await servers.loadAll();
 registry.start(config.HEALTH_INTERVAL_MS);
 
 const signer = new TokenSigner(config.SESSION_SECRET);
-const app = createApp({ config, registry, repo, servers, signer, urlGuard });
+const provider =
+  config.LLM_PROVIDER === "gemini" && config.GEMINI_API_KEY
+    ? new GeminiProvider(config.GEMINI_API_KEY, config.LLM_MODEL)
+    : null;
+if (!provider) console.warn("chat agent disabled: no LLM API key configured");
+const app = createApp({ config, registry, repo, servers, signer, urlGuard, provider });
 
 const server = app.listen(config.PORT, "0.0.0.0", () => {
   console.log(`gateway listening on :${config.PORT}`);

@@ -49,7 +49,7 @@ const schema = z.object({
   // URL the chat agent uses to reach this gateway's own /mcp.
   SELF_MCP_URL: z.url().default("http://127.0.0.1:8080/mcp"),
   LLM_PROVIDER: z.enum(["gemini", "none"]).default("gemini"),
-  LLM_MODEL: z.string().default("gemini-2.5-flash"),
+  LLM_MODEL: z.string().default("gemini-flash-latest"),
   GEMINI_API_KEY: z.string().optional(),
   CHAT_MAX_STEPS: z.coerce.number().int().min(1).max(20).default(8),
 });
