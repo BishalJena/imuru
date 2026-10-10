@@ -1,0 +1,111 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: wordpress
+  labels: {{- include "store.labels" (dict "ctx" $ "component" "wordpress") | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- include "store.storageClass" . | nindent 2 }}
+  resources:
+    requests:
+      storage: {{ .Values.wordpress.persistence.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wordpress
+  labels: {{- include "store.labels" (dict "ctx" $ "component" "wordpress") | nindent 4 }}
+spec:
+  selector: {{- include "store.selectorLabels" (dict "ctx" $ "component" "wordpress") | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wordpress
+  labels: {{- include "store.labels" (dict "ctx" $ "component" "wordpress") | nindent 4 }}
+spec:
+  replicas: 1
+  # RWO volume: a rolling update would start the new pod while the old one still
+  # holds the volume, and on another node it could never attach.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {{- include "store.selectorLabels" (dict "ctx" $ "component" "wordpress") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "store.labels" (dict "ctx" $ "component" "wordpress") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include "store.wordpressEnv" . | sha256sum }}
+    spec:
+      containers:
+        - name: wordpress
+          image: "{{ .Values.wordpress.image.repository }}:{{ .Values.wordpress.image.tag }}"
+          imagePullPolicy: {{ .Values.wordpress.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+          env: {{- include "store.wordpressEnv" . | nindent 12 }}
+          # First start copies WordPress core onto the empty volume before Apache listens.
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          # 2xx and 3xx both pass, so this works before and after `wp core install`
+          # (wp-login.php redirects to the installer until then). It runs PHP and
+          # opens a DB connection, so it fails when MariaDB is down.
+          readinessProbe:
+            httpGet:
+              path: /wp-login.php
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # TCP only: a MariaDB outage must not restart Apache.
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          resources: {{- toYaml .Values.wordpress.resources | nindent 12 }}
+          volumeMounts:
+            - name: html
+              mountPath: /var/www/html
+      volumes:
+        - name: html
+          persistentVolumeClaim:
+            claimName: wordpress
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: wordpress
+  labels: {{- include "store.labels" (dict "ctx" $ "component" "wordpress") | nindent 4 }}
+  {{- if and .Values.global.tls.enabled .Values.global.tls.clusterIssuer }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ .Values.global.tls.clusterIssuer }}
+  {{- end }}
+spec:
+  ingressClassName: traefik
+  {{- if .Values.global.tls.enabled }}
+  tls:
+    - hosts: [{{ include "store.host" . }}]
+      secretName: wordpress-tls
+  {{- end }}
+  rules:
+    - host: {{ include "store.host" . }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: wordpress
+                port:
+                  name: http

@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bootstrap
+  labels: {{- include "store.labels" (dict "ctx" $ "component" "bootstrap") | nindent 4 }}
+data:
+  bootstrap.sh: |
+    {{- .Files.Get "files/bootstrap.sh" | nindent 4 }}
+  rest-key.php: |
+    {{- .Files.Get "files/rest-key.php" | nindent 4 }}
+  products.txt: |
+    {{- range .Values.store.products }}
+    {{ .sku }}|{{ .price }}|{{ .name }}
+    {{- end }}
+  wp-cli.yml: |
+    apache_modules:
+      - mod_rewrite
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bootstrap
+  labels: {{- include "store.labels" (dict "ctx" $ "component" "bootstrap") | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    # Keep the last run (and its logs) until the next upgrade replaces it.
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: {{ .Values.bootstrap.backoffLimit }}
+  activeDeadlineSeconds: {{ add .Values.bootstrap.waitTimeoutSeconds 600 }}
+  template:
+    metadata:
+      labels: {{- include "store.labels" (dict "ctx" $ "component" "bootstrap") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      securityContext:
+        # Match www-data in the Debian-based WordPress image that owns the volume.
+        runAsUser: 33
+        runAsGroup: 33
+      containers:
+        - name: wp-cli
+          image: "{{ .Values.bootstrap.image.repository }}:{{ .Values.bootstrap.image.tag }}"
+          imagePullPolicy: {{ .Values.bootstrap.image.pullPolicy }}
+          command: [sh, /bootstrap/bootstrap.sh]
+          env:
+            {{- include "store.wordpressEnv" . | nindent 12 }}
+            - name: HOME
+              value: /tmp
+            - name: WP_CLI_CONFIG_PATH
+              value: /bootstrap/wp-cli.yml
+            - name: WP_CLI_PHP_ARGS
+              value: -d memory_limit=512M
+            - name: WAIT_TIMEOUT_SECONDS
+              value: {{ .Values.bootstrap.waitTimeoutSeconds | quote }}
+            - name: SITE_URL
+              value: {{ include "store.url" . | quote }}
+            - name: SITE_TITLE
+              value: {{ .Values.store.title | quote }}
+            - name: ADMIN_USER
+              value: {{ .Values.store.adminUser | quote }}
+            - name: ADMIN_EMAIL
+              value: {{ .Values.store.adminEmail | quote }}
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: wordpress, key: admin-password }
+            - name: WOO_VERSION
+              value: {{ .Values.bootstrap.woocommerceVersion | quote }}
+            - name: STORE_COUNTRY
+              value: {{ .Values.store.country | quote }}
+            - name: STORE_TIMEZONE
+              value: {{ .Values.store.timezone | quote }}
+            - name: STORE_CURRENCY
+              value: {{ .Values.store.currency | quote }}
+            - name: WOO_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef: { name: woo-rest, key: consumer-key }
+            - name: WOO_CONSUMER_SECRET
+              valueFrom:
+                secretKeyRef: { name: woo-rest, key: consumer-secret }
+          resources: {{- toYaml .Values.bootstrap.resources | nindent 12 }}
+          volumeMounts:
+            - name: html
+              mountPath: /var/www/html
+            - name: bootstrap
+              mountPath: /bootstrap
+              readOnly: true
+      volumes:
+        - name: html
+          persistentVolumeClaim:
+            claimName: wordpress
+        - name: bootstrap
+          configMap:
+            name: bootstrap

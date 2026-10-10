@@ -1,0 +1,24 @@
+# Set global.domain at install time: --set global.domain=<vps-ip>.sslip.io (or a real domain).
+global:
+  domain: ""
+  storageClass: local-path
+  tls:
+    enabled: true
+    clusterIssuer: letsencrypt-prod
+
+store:
+  adminEmail: ""
+
+mariadb:
+  persistence:
+    size: 10Gi
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "2", memory: 1536Mi }
+
+wordpress:
+  persistence:
+    size: 10Gi
+  resources:
+    requests: { cpu: 250m, memory: 384Mi }
+    limits: { cpu: "2", memory: 1Gi }

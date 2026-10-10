@@ -1,0 +1,64 @@
+global:
+  domain: 127.0.0.1.nip.io
+  storageClass: ""
+  tls:
+    enabled: false
+    clusterIssuer: ""
+
+store:
+  # Public hostname is <host>.<global.domain> unless hostOverride is set.
+  host: store
+  hostOverride: ""
+  title: Urumi Demo Store
+  adminUser: admin
+  adminEmail: admin@example.com
+  country: "IN:OD"
+  currency: INR
+  # Store-local "today" for order queries is based on this.
+  timezone: Asia/Kolkata
+  products:
+    - sku: DEMO-TEE
+      name: Urumi T-Shirt
+      price: "499"
+    - sku: DEMO-MUG
+      name: Urumi Mug
+      price: "299"
+    - sku: DEMO-CAP
+      name: Urumi Cap
+      price: "349"
+
+mariadb:
+  image:
+    repository: mariadb
+    tag: "11.8.9"
+    pullPolicy: IfNotPresent
+  database: wordpress
+  user: wordpress
+  persistence:
+    size: 2Gi
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 1Gi }
+
+wordpress:
+  image:
+    repository: wordpress
+    tag: "7.1.1-php8.3-apache"
+    pullPolicy: IfNotPresent
+  persistence:
+    size: 5Gi
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 768Mi }
+
+bootstrap:
+  image:
+    repository: wordpress
+    tag: "cli-2.12.0-php8.3"
+    pullPolicy: IfNotPresent
+  woocommerceVersion: "11.1.2"
+  waitTimeoutSeconds: 600
+  backoffLimit: 3
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 768Mi }
