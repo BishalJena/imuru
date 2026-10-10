@@ -1,0 +1,75 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+# Deny all ingress to every pod in the namespace; the policies below open only
+# the paths the store needs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  labels: {{- include "store.labels" (dict "ctx" $ "component" "network") | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: wordpress
+  labels: {{- include "store.labels" (dict "ctx" $ "component" "wordpress") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "store.selectorLabels" (dict "ctx" $ "component" "wordpress") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $np.ingressController.namespace }}
+          podSelector:
+            matchLabels: {{- toYaml $np.ingressController.podLabels | nindent 14 }}
+        - podSelector:
+            matchLabels: {{- include "store.selectorLabels" (dict "ctx" $ "component" "woo-mcp") | nindent 14 }}
+      ports:
+        - port: http
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mariadb
+  labels: {{- include "store.labels" (dict "ctx" $ "component" "mariadb") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "store.selectorLabels" (dict "ctx" $ "component" "mariadb") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "store.selectorLabels" (dict "ctx" $ "component" "wordpress") | nindent 14 }}
+        - podSelector:
+            matchLabels: {{- include "store.selectorLabels" (dict "ctx" $ "component" "bootstrap") | nindent 14 }}
+      ports:
+        - port: mysql
+{{- if .Values.wooMcp.enabled }}
+---
+# woo-mcp is reachable only from gateway pods in the platform namespace. Both
+# selectors sit in one `from` entry, so a pod must match both (AND, not OR).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: woo-mcp
+  labels: {{- include "store.labels" (dict "ctx" $ "component" "woo-mcp") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "store.selectorLabels" (dict "ctx" $ "component" "woo-mcp") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $np.gateway.namespace }}
+          podSelector:
+            matchLabels: {{- toYaml $np.gateway.podLabels | nindent 14 }}
+      ports:
+        - port: http
+{{- end }}
+{{- end }}

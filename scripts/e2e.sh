@@ -151,6 +151,25 @@ retry 15 check_gateway_woo_connected && ok "woo upstream is connected" || ko "wo
 retry 5 check_gateway_lists_woo_tools && ok "tools/list returns the six woo__ tools" || ko "tools/list returns the six woo__ tools"
 retry 5 check_gateway_orders_today && ok "woo__list_orders(today) returns order #${E2E_ORDER:-?}" || ko "woo__list_orders(today) returns the e2e order"
 
+# tcp_from <namespace> <host> <port>: "open" or "blocked", as seen by a throwaway pod.
+tcp_from() {
+  local ns=$1 host=$2 port=$3 name="e2e-probe-$RANDOM"
+  kubectl -n "$ns" run "$name" --restart=Never --image=busybox:1.37.0 --labels=app.kubernetes.io/name=e2e-probe \
+    --command -- sh -c "sleep 3; if nc -z -w 4 $host $port; then echo open; else echo blocked; fi" >/dev/null
+  kubectl -n "$ns" wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$name" --timeout=90s >/dev/null 2>&1 || true
+  kubectl -n "$ns" logs "$name" 2>/dev/null
+  kubectl -n "$ns" delete pod "$name" --wait=false >/dev/null 2>&1
+}
+
+echo
+echo "isolation"
+# Positive control first: the probe must be able to see an open port, or "blocked" proves nothing.
+[[ "$(tcp_from default "kube-dns.kube-system.svc" 53)" == open ]] && ok "probe sees an open port (kube-dns)" || ko "probe sees an open port (kube-dns)"
+[[ "$(tcp_from default "woo-mcp.$STORE_NS.svc" 3000)" == blocked ]] && ok "woo-mcp unreachable from namespace default" || ko "woo-mcp unreachable from namespace default"
+[[ "$(tcp_from "$STORE_NS" woo-mcp 3000)" == blocked ]] && ok "woo-mcp unreachable from other pods in $STORE_NS" || ko "woo-mcp unreachable from other pods in $STORE_NS"
+[[ "$(tcp_from default "mariadb.$STORE_NS.svc" 3306)" == blocked ]] && ok "mariadb unreachable from namespace default" || ko "mariadb unreachable from namespace default"
+[[ "$(tcp_from default "wordpress.$STORE_NS.svc" 80)" == blocked ]] && ok "wordpress reachable only via the Ingress" || ko "wordpress reachable only via the Ingress"
+
 echo
 echo "$pass passed, $fail failed"
 [[ "$fail" -eq 0 ]]

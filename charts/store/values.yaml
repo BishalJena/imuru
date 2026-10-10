@@ -73,3 +73,16 @@ wooMcp:
   resources:
     requests: { cpu: 50m, memory: 96Mi }
     limits: { cpu: 500m, memory: 256Mi }
+
+networkPolicy:
+  enabled: true
+  # Who may reach the storefront: the Ingress controller.
+  ingressController:
+    namespace: kube-system
+    podLabels:
+      app.kubernetes.io/name: traefik
+  # Who may call woo-mcp: the gateway, and nothing else.
+  gateway:
+    namespace: platform
+    podLabels:
+      app.kubernetes.io/name: gateway
