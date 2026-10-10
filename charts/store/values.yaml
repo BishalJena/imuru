@@ -62,3 +62,14 @@ bootstrap:
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 768Mi }
+
+wooMcp:
+  enabled: true
+  image:
+    repository: urumi/woo-mcp
+    tag: dev
+    pullPolicy: IfNotPresent
+  timeoutMs: 15000
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { cpu: 500m, memory: 256Mi }

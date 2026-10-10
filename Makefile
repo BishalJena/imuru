@@ -1,8 +1,12 @@
 CLUSTER := urumi
 K3D_CONFIG := scripts/k3d-config.yaml
 HELM_TIMEOUT := 15m
+# Content hash of each image's inputs: unchanged code keeps its tag, changed code gets a new one,
+# so `helm upgrade` only restarts what changed.
+src_hash = $(shell cat $$(git ls-files -co --exclude-standard $(1) pnpm-lock.yaml tsconfig.base.json | sort) | shasum | cut -c1-12)
+WOO_MCP_TAG := $(call src_hash,apps/woo-mcp)
 
-.PHONY: help install typecheck lint test check cluster-up cluster-down deploy-store deploy-local helm-lint e2e
+.PHONY: help install typecheck lint test check cluster-up cluster-down deploy-store deploy-local helm-lint e2e images
 
 help:
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -33,11 +37,16 @@ cluster-down: ## Delete the local k3d cluster and all its data
 helm-lint: ## Lint every chart with its local values
 	@for c in charts/*/; do helm lint $$c -f $$c/values-local.yaml || exit 1; done
 
+images: ## Build app images and import them into the k3d cluster
+	docker build -f apps/woo-mcp/Dockerfile -t urumi/woo-mcp:$(WOO_MCP_TAG) .
+	k3d image import -c $(CLUSTER) urumi/woo-mcp:$(WOO_MCP_TAG)
+
 deploy-store: ## Install or upgrade the store release (namespace store)
 	helm upgrade --install store charts/store -n store --create-namespace \
-		-f charts/store/values-local.yaml --wait --timeout $(HELM_TIMEOUT)
+		-f charts/store/values-local.yaml --set wooMcp.image.tag=$(WOO_MCP_TAG) \
+		--wait --timeout $(HELM_TIMEOUT)
 
-deploy-local: deploy-store ## Deploy everything to the local cluster
+deploy-local: images deploy-store ## Build images and deploy everything to the local cluster
 
 e2e: ## Run end-to-end checks against the local cluster
 	scripts/e2e.sh

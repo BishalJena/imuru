@@ -1,0 +1,84 @@
+{{- if .Values.wooMcp.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: woo-mcp
+  labels: {{- include "store.labels" (dict "ctx" $ "component" "woo-mcp") | nindent 4 }}
+spec:
+  # ClusterIP only, and no Ingress: woo-mcp is never exposed outside the cluster.
+  type: ClusterIP
+  selector: {{- include "store.selectorLabels" (dict "ctx" $ "component" "woo-mcp") | nindent 4 }}
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: woo-mcp
+  labels: {{- include "store.labels" (dict "ctx" $ "component" "woo-mcp") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "store.selectorLabels" (dict "ctx" $ "component" "woo-mcp") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "store.labels" (dict "ctx" $ "component" "woo-mcp") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: woo-mcp
+          image: "{{ .Values.wooMcp.image.repository }}:{{ .Values.wooMcp.image.tag }}"
+          imagePullPolicy: {{ .Values.wooMcp.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: WOO_BASE_URL
+              value: http://wordpress
+            - name: WOO_SIGNING_URL
+              value: {{ include "store.url" . | quote }}
+            - name: WOO_TIMEOUT_MS
+              value: {{ .Values.wooMcp.timeoutMs | quote }}
+            - name: WOO_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef: { name: woo-rest, key: consumer-key }
+            - name: WOO_CONSUMER_SECRET
+              valueFrom:
+                secretKeyRef: { name: woo-rest, key: consumer-secret }
+            - name: MCP_BEARER_TOKEN
+              valueFrom:
+                secretKeyRef: { name: woo-mcp, key: bearer-token }
+            - name: ALLOWED_HOSTS
+              value: {{ printf "woo-mcp,woo-mcp.%[1]s,woo-mcp.%[1]s.svc,woo-mcp.%[1]s.svc.cluster.local,localhost,127.0.0.1" .Release.Namespace | quote }}
+          # The server validates the Host header; kubelet probes would otherwise
+          # send the pod IP and be rejected.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+              httpHeaders: [{ name: Host, value: localhost }]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+              httpHeaders: [{ name: Host, value: localhost }]
+            periodSeconds: 20
+            failureThreshold: 3
+          resources: {{- toYaml .Values.wooMcp.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+{{- end }}

@@ -12,4 +12,9 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     },
   },
+  {
+    // Tests assert on raw JSON-RPC payloads.
+    files: ["**/test/**/*.ts"],
+    rules: { "@typescript-eslint/no-explicit-any": "off" },
+  },
 );
