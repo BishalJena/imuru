@@ -1,0 +1,15 @@
+everything:
+  image:
+    repository: urumi/everything
+    tag: "2026.8.31"
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: 25m, memory: 96Mi }
+    limits: { cpu: 300m, memory: 256Mi }
+
+networkPolicy:
+  enabled: true
+  gateway:
+    namespace: platform
+    podLabels:
+      app.kubernetes.io/name: gateway

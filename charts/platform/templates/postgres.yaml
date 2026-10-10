@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels: {{- include "platform.labels" (dict "ctx" $ "component" "postgres") | nindent 4 }}
+spec:
+  clusterIP: None
+  selector: {{- include "platform.selectorLabels" (dict "ctx" $ "component" "postgres") | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels: {{- include "platform.labels" (dict "ctx" $ "component" "postgres") | nindent 4 }}
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: {{- include "platform.selectorLabels" (dict "ctx" $ "component" "postgres") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "platform.labels" (dict "ctx" $ "component" "postgres") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        # postgres user in the alpine image; the entrypoint fixes data dir ownership.
+        fsGroup: 70
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: postgres
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: gateway
+            - name: POSTGRES_USER
+              value: gateway
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: postgres, key: password }
+            # Subdirectory: the volume root may contain lost+found on some storage classes.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          startupProbe:
+            exec:
+              command: [pg_isready, -U, gateway, -d, gateway]
+            periodSeconds: 3
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, gateway, -d, gateway]
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: [pg_isready, -U, gateway, -d, gateway]
+            periodSeconds: 20
+            failureThreshold: 3
+          resources: {{- toYaml .Values.postgres.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
+      volumes:
+        - name: run
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels: {{- include "platform.labels" (dict "ctx" $ "component" "postgres") | nindent 10 }}
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- if .Values.global.storageClass }}
+        storageClassName: {{ .Values.global.storageClass }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.persistence.size }}

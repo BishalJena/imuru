@@ -13,6 +13,8 @@ export interface UpstreamConfig {
   enabled: boolean;
   timeoutMs: number;
   connectTimeoutMs: number;
+  /** fetch used for every request to this upstream (e.g. the SSRF-guarded one). */
+  fetch?: typeof fetch;
 }
 
 /**
@@ -103,6 +105,7 @@ export class Upstream extends EventEmitter<{ changed: [] }> {
     // the gateway (and its credential) to another host.
     const transport = new StreamableHTTPClientTransport(new URL(this.config.url), {
       requestInit: { headers, redirect: "error" },
+      ...(this.config.fetch ? { fetch: this.config.fetch } : {}),
     });
     await withTimeout(client.connect(transport), this.config.connectTimeoutMs, "connect");
     this.client = client;

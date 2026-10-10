@@ -10,6 +10,9 @@ app:
   host: app
   hostOverride: ""
 
+admin:
+  email: admin@urumi.local
+
 gateway:
   image:
     repository: urumi/gateway
@@ -17,16 +20,40 @@ gateway:
     pullPolicy: IfNotPresent
   upstreamTimeoutMs: 30000
   connectTimeoutMs: 5000
-  healthIntervalMs: 5000
+  # Short interval so a killed upstream shows as Unreachable within seconds.
+  healthIntervalMs: 3000
+  # Hosts an admin may register even though they resolve to cluster addresses.
+  upstreamAllowedHosts:
+    - everything.demo-upstreams.svc
+    - everything.demo-upstreams.svc.cluster.local
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: 500m, memory: 384Mi }
 
+llm:
+  provider: gemini
+  model: gemini-2.5-flash
+  maxSteps: 8
+  # Supply via --set llm.apiKey=... or a gitignored values-secrets file. Kept in
+  # Secret platform/gateway; an empty value keeps whatever the Secret holds.
+  apiKey: ""
+
+postgres:
+  image:
+    repository: postgres
+    tag: "17.11-alpine"
+    pullPolicy: IfNotPresent
+  persistence:
+    size: 2Gi
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
 # Render even if an upstream's source Secret is missing (lint, template). Never set on a real install.
 allowMissingUpstreamSecrets: false
 
-# Servers registered at startup. A credential is either copied from a Secret in
-# another namespace at install time (fromSecret) or supplied out of band.
+# Servers registered at startup ("managed"). A credential is copied from a
+# Secret in the owning namespace at install time (fromSecret).
 upstreams:
   - slug: woo
     name: WooCommerce
@@ -36,3 +63,9 @@ upstreams:
       namespace: store
       name: woo-mcp
       key: bearer-token
+  - slug: everything-a
+    name: Everything (A)
+    url: http://everything.demo-upstreams.svc:3001/mcp
+  - slug: everything-b
+    name: Everything (B)
+    url: http://everything.demo-upstreams.svc:3001/mcp

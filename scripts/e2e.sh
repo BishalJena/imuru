@@ -91,15 +91,38 @@ retry 5 check_products && ok "shop lists products" || ko "shop lists products"
 retry 3 check_cod_order && ok "COD checkout creates order #${E2E_ORDER} visible to admin API" \
   || ko "COD checkout creates an order visible to admin API"
 
-GATEWAY_KEY=$(kubectl -n "$PLATFORM_NS" get secret gateway -o jsonpath='{.data.api-key}' | base64 -d)
+COOKIES=$(mktemp -d)
+trap 'rm -rf "$COOKIES"' EXIT
+ADMIN_EMAIL=$(helm get values platform -n "$PLATFORM_NS" --all -o json | json 'd["admin"]["email"]')
+ADMIN_PASSWORD=$(kubectl -n "$PLATFORM_NS" get secret gateway -o jsonpath='{.data.admin-password}' | base64 -d)
+MEMBER_EMAIL="${MEMBER_EMAIL:-user-b@e2e.test}"
+MEMBER_PASSWORD="e2e-member-password"
 
-# mcp <session-id|""> <json-rpc body>: POST to the gateway; prints the JSON-RPC
-# payload (unwrapping single-event SSE framing). With an empty session id, prints
-# the new session id instead.
+# api <who> <method> <path> [json]: dashboard API call with that user's cookie.
+api() {
+  local who=$1 method=$2 path=$3 body=${4:-}
+  curl -s -b "$COOKIES/$who" -c "$COOKIES/$who" -X "$method" "$APP_URL/api$path" \
+    ${body:+-H 'Content-Type: application/json' -d "$body"}
+}
+
+login() { api "$1" POST /auth/login "{\"email\":\"$2\",\"password\":\"$3\"}" | grep -q '"id"'; }
+
+# Invites user B on first run; later runs log in with the same password.
+ensure_member() {
+  local url token
+  login member "$MEMBER_EMAIL" "$MEMBER_PASSWORD" && return 0
+  url=$(api admin POST /invites "{\"email\":\"$MEMBER_EMAIL\",\"name\":\"User B\",\"role\":\"member\"}" | json 'd["invite_url"]') || return 1
+  token=${url##*/}
+  api member POST /invites/accept "{\"token\":\"$token\",\"password\":\"$MEMBER_PASSWORD\"}" | grep -q '"id"'
+}
+
+KEY=""
+# mcp <session-id|""> <json-rpc body>: POST to the gateway with $KEY; prints the
+# JSON-RPC payload (unwrapping SSE framing), or the new session id when none given.
 mcp() {
   local sid=$1 body=$2 headers out
   headers=$(mktemp)
-  out=$(curl -s -D "$headers" "$APP_URL/mcp" -H "Authorization: Bearer $GATEWAY_KEY" \
+  out=$(curl -s -D "$headers" "$APP_URL/mcp" -H "Authorization: Bearer $KEY" \
     ${sid:+-H "Mcp-Session-Id: $sid"} -H 'MCP-Protocol-Version: 2025-06-18' \
     -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d "$body")
   if [[ -z "$sid" ]]; then
@@ -118,38 +141,69 @@ mcp_session() {
   echo "$sid"
 }
 
-check_gateway_rejects_no_key() {
-  [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$APP_URL/mcp")" == 401 ]]
-}
+tool_names() { mcp "$1" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | json '" ".join(sorted(t["name"] for t in d["result"]["tools"]))'; }
 
-check_gateway_woo_connected() {
-  curl -sf "$APP_URL/api/servers" -H "Authorization: Bearer $GATEWAY_KEY" \
-    | json '[s for s in d if s["slug"] == "woo"][0]["status"]' | grep -qx connected
-}
+# call_tool <session> <tool> <arguments json>
+call_tool() { mcp "$1" "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"$2\",\"arguments\":$3}}"; }
 
-check_gateway_lists_woo_tools() {
-  local sid
-  sid=$(mcp_session) || return 1
-  mcp "$sid" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-    | json '",".join(sorted(t["name"] for t in d["result"]["tools"] if t["name"].startswith("woo__")))' \
-    | grep -qx 'woo__create_product,woo__get_order,woo__get_store_info,woo__list_orders,woo__list_products,woo__update_order_status'
-}
-
-check_gateway_orders_today() {
-  local sid today
-  sid=$(mcp_session) || return 1
-  today=$(mcp "$sid" '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"woo__get_store_info","arguments":{}}}' \
-    | json 'd["result"]["structuredContent"]["today"]') || return 1
-  mcp "$sid" "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"woo__list_orders\",\"arguments\":{\"date\":\"$today\"}}}" \
-    | json '[o["id"] for o in d["result"]["structuredContent"]["items"]]' | grep -q "${E2E_ORDER:-}"
-}
+server_status() { api admin GET /servers | json "[s['status'] for s in d if s['slug'] == '$1'][0]"; }
+server_id() { api admin GET /servers | json "[s['id'] for s in d if s['slug'] == '$1'][0]"; }
 
 echo
 echo "gateway ($APP_URL)"
-retry 3 check_gateway_rejects_no_key && ok "/mcp rejects a request without an API key" || ko "/mcp rejects a request without an API key"
-retry 15 check_gateway_woo_connected && ok "woo upstream is connected" || ko "woo upstream is connected"
-retry 5 check_gateway_lists_woo_tools && ok "tools/list returns the six woo__ tools" || ko "tools/list returns the six woo__ tools"
-retry 5 check_gateway_orders_today && ok "woo__list_orders(today) returns order #${E2E_ORDER:-?}" || ko "woo__list_orders(today) returns the e2e order"
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$APP_URL/mcp")" == 401 ]] && ok "/mcp rejects a request without an API key" || ko "/mcp rejects a request without an API key"
+retry 10 login admin "$ADMIN_EMAIL" "$ADMIN_PASSWORD" && ok "admin logs in to the dashboard API" || ko "admin logs in to the dashboard API"
+retry 3 ensure_member && ok "user B (member) accepted an invite and logged in" || ko "user B (member) accepted an invite and logged in"
+KEY=$(api member POST /keys '{"name":"e2e"}' | json 'd["key"]' 2>/dev/null || true)
+[[ "$KEY" == urk_* ]] && ok "user B generated their own API key" || ko "user B generated their own API key"
+for s in woo everything-a everything-b; do
+  retry 20 eval "[[ \$(server_status $s) == connected ]]" && ok "upstream $s is connected" || ko "upstream $s is connected"
+done
+
+SID=$(mcp_session || true)
+names=$(tool_names "$SID" 2>/dev/null || true)
+[[ " $names " == *" woo__list_orders "* && " $names " == *" everything-a__echo "* && " $names " == *" everything-b__echo "* ]] \
+  && ok "user B sees every enabled server's tools; echo from both 'everything' servers coexists" \
+  || ko "user B sees every enabled server's tools"
+
+check_orders_today() {
+  local today
+  today=$(call_tool "$SID" woo__get_store_info "{}" | json 'd["result"]["structuredContent"]["today"]') || return 1
+  call_tool "$SID" woo__list_orders "{\"date\":\"$today\"}" | json '[o["id"] for o in d["result"]["structuredContent"]["items"]]' | grep -q "${E2E_ORDER:-}"
+}
+retry 5 check_orders_today && ok "user B: woo__list_orders(today) returns order #${E2E_ORDER:-?}" || ko "user B: orders today returns the e2e order"
+[[ "$(call_tool "$SID" everything-a__echo '{"message":"hi"}' | json 'd["result"]["content"][0]["text"]')" == *hi* ]] \
+  && ok "calls route to the right server (everything-a__echo)" || ko "calls route to the right server"
+
+# Disable: tools disappear from the list and direct calls are rejected.
+EB=$(server_id everything-b)
+api admin PATCH "/servers/$EB" '{"enabled":false}' >/dev/null
+names=$(tool_names "$SID")
+[[ " $names " != *" everything-b__"* && " $names " == *" everything-a__echo "* ]] && ok "disabled server's tools disappear from tools/list" || ko "disabled server's tools disappear"
+[[ "$(call_tool "$SID" everything-b__echo '{"message":"x"}' | json 'd["result"]["isError"]')" == True ]] && ok "call to a disabled server is rejected" || ko "call to a disabled server is rejected"
+api admin PATCH "/servers/$EB" '{"enabled":true}' >/dev/null
+retry 10 eval "[[ \$(server_status everything-b) == connected ]]" && ok "re-enabled server reconnects" || ko "re-enabled server reconnects"
+
+# Kill an upstream pod: the others keep working and it shows as unreachable.
+kubectl -n demo-upstreams delete pod -l app.kubernetes.io/name=everything --wait=false >/dev/null
+retry 15 eval "[[ \$(server_status everything-a) == unreachable ]]" && ok "killed upstream shows as unreachable" || ko "killed upstream shows as unreachable"
+[[ "$(call_tool "$SID" woo__get_store_info "{}" | json 'd["result"].get("isError", False)')" == False ]] && ok "woo keeps working while everything is down" || ko "woo keeps working while everything is down"
+retry 40 eval "[[ \$(server_status everything-a) == connected ]]" && ok "upstream recovers when its replacement pod is ready" || ko "upstream recovers when its replacement pod is ready"
+
+# Audit: B's calls are recorded under B.
+audit_has() { api admin GET "/audit?limit=200" | json "any(r['user_email']=='$MEMBER_EMAIL' and r['tool']=='$1' and r['outcome']=='$2' for r in d)" | grep -qx True; }
+retry 3 audit_has list_orders ok && ok "audit log: user B, woo list_orders, ok" || ko "audit log records user B's call"
+retry 3 audit_has echo unknown_tool && ok "audit log: rejected call to the disabled server" || ko "audit log records the rejected call"
+
+# Revoke: the next call is rejected, even inside the open session.
+KEY_ID=$(api member GET /keys | json '[k["id"] for k in d if k["revoked_at"] is None][0]')
+api admin DELETE "/users/$(api admin GET /users | json "[u['id'] for u in d if u['email']=='$MEMBER_EMAIL'][0]")/keys/$KEY_ID" >/dev/null
+status=$(curl -s -o /dev/null -w '%{http_code}' "$APP_URL/mcp" -H "Authorization: Bearer $KEY" -H "Mcp-Session-Id: $SID" \
+  -H 'MCP-Protocol-Version: 2025-06-18' -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":9,"method":"tools/list"}')
+[[ "$status" == 401 ]] && ok "admin revoked B's key; B's next call is rejected (401)" || ko "revoked key is rejected" "$status"
+api admin GET "/audit?outcome=auth_rejected&limit=50" | json "any(r['user_email']=='$MEMBER_EMAIL' for r in d)" | grep -qx True \
+  && ok "audit log: rejected call attributed to user B" || ko "audit log attributes the rejected call to user B"
 
 # tcp_from <namespace> <host> <port>: "open" or "blocked", as seen by a throwaway pod.
 tcp_from() {

@@ -41,6 +41,21 @@ export class Registry extends EventEmitter<{ toolsChanged: [] }> {
     return upstream;
   }
 
+  async remove(slug: string): Promise<void> {
+    const upstream = this.upstreams.get(slug);
+    if (!upstream) return;
+    this.upstreams.delete(slug);
+    upstream.removeAllListeners();
+    await upstream.close();
+    this.emit("toolsChanged");
+  }
+
+  /** Replace a server's connection settings: closes the old client and connects anew. */
+  async replace(config: UpstreamConfig): Promise<Upstream> {
+    await this.remove(config.slug);
+    return this.add(config);
+  }
+
   get(slug: string): Upstream | undefined {
     return this.upstreams.get(slug);
   }

@@ -43,9 +43,38 @@ spec:
           env:
             - name: PORT
               value: "8080"
-            - name: GATEWAY_API_KEY
+            - name: POSTGRES_PASSWORD
               valueFrom:
-                secretKeyRef: { name: gateway, key: api-key }
+                secretKeyRef: { name: postgres, key: password }
+            # $(VAR) expansion: Kubernetes substitutes the Secret-sourced env var above.
+            - name: DATABASE_URL
+              value: postgres://gateway:$(POSTGRES_PASSWORD)@postgres:5432/gateway
+            - name: PUBLIC_URL
+              value: {{ printf "%s://%s" (ternary "https" "http" .Values.global.tls.enabled) (include "platform.host" .) | quote }}
+            - name: SELF_MCP_URL
+              value: http://127.0.0.1:8080/mcp
+            - name: ADMIN_EMAIL
+              value: {{ .Values.admin.email | quote }}
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: gateway, key: admin-password }
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef: { name: gateway, key: session-secret }
+            - name: CREDENTIAL_KEY
+              valueFrom:
+                secretKeyRef: { name: gateway, key: credential-key }
+            - name: LLM_PROVIDER
+              value: {{ .Values.llm.provider | quote }}
+            - name: LLM_MODEL
+              value: {{ .Values.llm.model | quote }}
+            - name: CHAT_MAX_STEPS
+              value: {{ .Values.llm.maxSteps | quote }}
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef: { name: gateway, key: llm-api-key, optional: true }
+            - name: UPSTREAM_ALLOWED_HOSTS
+              value: {{ join "," .Values.gateway.upstreamAllowedHosts | quote }}
             - name: UPSTREAM_TIMEOUT_MS
               value: {{ .Values.gateway.upstreamTimeoutMs | quote }}
             - name: UPSTREAM_CONNECT_TIMEOUT_MS
@@ -64,6 +93,7 @@ spec:
             - name: SEED_UPSTREAMS
               value: {{ include "platform.seedUpstreams" . | quote }}
           # Host header set explicitly: kubelet would send the pod IP, which the allowlist rejects.
+          # Readiness = database reachable. Upstream health is reported per server, not via probes.
           readinessProbe:
             httpGet:
               path: /readyz

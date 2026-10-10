@@ -16,6 +16,7 @@ WORKDIR /app
 COPY --from=build --chown=node:node /out/node_modules ./node_modules
 COPY --from=build --chown=node:node /out/package.json ./
 COPY --from=build --chown=node:node /repo/apps/gateway/dist ./dist
+COPY --chown=node:node apps/gateway/migrations ./migrations
 USER node
 EXPOSE 8080
 CMD ["node", "dist/index.js"]

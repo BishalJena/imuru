@@ -1,70 +1,56 @@
 import type { Server as HttpServer } from "node:http";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createApp } from "../src/app.js";
-import type { Config } from "../src/config.js";
-import { Registry, splitToolName } from "../src/registry.js";
-import { fakeUpstream, listen, until } from "./helpers.js";
+import { splitToolName } from "../src/registry.js";
+import { fakeUpstream, until } from "./helpers.js";
+import { startGateway } from "./harness.js";
 
-const KEY = "k".repeat(40);
-const config: Config = {
-  PORT: 0,
-  GATEWAY_API_KEY: KEY,
-  SEED_UPSTREAMS: [],
-  UPSTREAM_TIMEOUT_MS: 300,
-  UPSTREAM_CONNECT_TIMEOUT_MS: 500,
-  HEALTH_INTERVAL_MS: 60_000,
-  SESSION_IDLE_MS: 60_000,
-  ALLOWED_HOSTS: ["127.0.0.1", "localhost"],
-};
+let gw: Awaited<ReturnType<typeof startGateway>>;
+const upstreams: HttpServer[] = [];
+let key: string;
+let adminId: string;
 
-const servers: HttpServer[] = [];
-let registry: Registry;
-let gatewayUrl: string;
-
-async function connectClient(key = KEY, onListChanged?: () => void) {
+async function connectClient(token = key, onListChanged?: () => void) {
   const client = new Client({ name: "test", version: "1" });
   if (onListChanged)
     client.setNotificationHandler("notifications/tools/list_changed", async () => onListChanged());
   await client.connect(
-    new StreamableHTTPClientTransport(new URL(`${gatewayUrl}/mcp`), {
-      requestInit: { headers: { Authorization: `Bearer ${key}` } },
+    new StreamableHTTPClientTransport(new URL(`${gw.url}/mcp`), {
+      requestInit: { headers: { Authorization: `Bearer ${token}` } },
     }),
   );
   return client;
 }
 
 beforeAll(async () => {
+  gw = await startGateway();
   const a = await fakeUpstream({ name: "alpha", token: "alpha-secret" });
   const b = await fakeUpstream({ name: "beta" });
   const slow = await fakeUpstream({ name: "slow", delayMs: 2000 });
-  servers.push(a.server, b.server, slow.server);
-
-  registry = new Registry();
-  const base = { enabled: true, timeoutMs: 300, connectTimeoutMs: 500 };
-  registry.add({
+  upstreams.push(a.server, b.server, slow.server);
+  const base = { auth_type: "none" as const, timeout_ms: 1000 };
+  await gw.servers.create({
     ...base,
     slug: "alpha",
     name: "Alpha",
     url: a.url,
-    auth: { type: "bearer", token: "alpha-secret" },
+    auth_type: "bearer",
+    credential: "alpha-secret",
   });
-  registry.add({ ...base, slug: "beta", name: "Beta", url: b.url });
-  registry.add({ ...base, slug: "slow", name: "Slow", url: slow.url });
+  await gw.servers.create({ ...base, slug: "beta", name: "Beta", url: b.url });
+  await gw.servers.create({ ...base, slug: "slow", name: "Slow", url: slow.url });
   // Nothing listens on port 9: connection refused.
-  registry.add({ ...base, slug: "dead", name: "Dead", url: "http://127.0.0.1:9/mcp" });
-
-  const gw = await listen(createApp(config, registry));
-  servers.push(gw.server);
-  gatewayUrl = gw.url;
+  await gw.servers.create({ ...base, slug: "dead", name: "Dead", url: "http://127.0.0.1:9/mcp" });
   await until(() =>
-    registry.list().every((u) => u.status !== "unreachable" || u.config.slug === "dead"),
+    ["alpha", "beta", "slow"].every((s) => gw.registry.get(s)?.status === "connected"),
   );
+  adminId = (await gw.repo.userByEmailWithHash("admin@test.dev"))!.id;
+  key = (await gw.repo.createApiKey(adminId, "test", adminId)).key;
 });
 
 afterAll(async () => {
-  await registry.stop();
-  for (const s of servers) s.close();
+  await gw.stop();
+  for (const s of upstreams) s.close();
 });
 
 describe("splitToolName", () => {
@@ -77,23 +63,23 @@ describe("splitToolName", () => {
 });
 
 describe("gateway /mcp", () => {
-  it("rejects a missing or wrong API key before any MCP processing", async () => {
-    await expect(connectClient("wrong".repeat(10))).rejects.toThrow();
-    const res = await fetch(`${gatewayUrl}/mcp`, { method: "POST" });
-    expect(res.status).toBe(401);
+  it("rejects a missing or malformed API key before any MCP processing", async () => {
+    await expect(connectClient("urk_nope")).rejects.toThrow();
+    expect((await fetch(`${gw.url}/mcp`, { method: "POST" })).status).toBe(401);
   });
 
   it("namespaces tools so identical upstream names do not collide", async () => {
     const client = await connectClient();
-    const names = (await client.listTools()).tools.map((t) => t.name).sort();
-    expect(names).toEqual(["alpha__echo", "beta__echo", "slow__echo"]);
-    const alpha = (await client.listTools()).tools.find((t) => t.name === "alpha__echo");
-    expect(alpha?.description).toBe("[Alpha] echo from alpha");
+    const tools = (await client.listTools()).tools;
+    expect(tools.map((t) => t.name).sort()).toEqual(["alpha__echo", "beta__echo", "slow__echo"]);
+    expect(tools.find((t) => t.name === "alpha__echo")?.description).toBe(
+      "[Alpha] echo from alpha",
+    );
     await client.close();
   });
 
   it("lists tools without waiting on a dead upstream", async () => {
-    expect(registry.get("dead")?.status).toBe("unreachable");
+    await until(() => gw.registry.get("dead")?.status === "unreachable");
     const client = await connectClient();
     const started = Date.now();
     await client.listTools();
@@ -117,7 +103,7 @@ describe("gateway /mcp", () => {
       client.callTool({ name: "beta__echo", arguments: { text: "y" } }),
     ]);
     expect(slow.isError).toBe(true);
-    expect(slow.content).toEqual([{ type: "text", text: "Slow did not respond within 0.3s" }]);
+    expect(slow.content).toEqual([{ type: "text", text: "Slow did not respond within 1s" }]);
     expect(fast.isError).toBeFalsy();
     await client.close();
   });
@@ -136,26 +122,64 @@ describe("gateway /mcp", () => {
 
   it("pushes tools/list_changed and drops a disabled server's tools", async () => {
     let notified = 0;
-    const client = await connectClient(KEY, () => notified++);
-    // Open the standalone SSE stream so server-initiated notifications can arrive.
+    const client = await connectClient(key, () => notified++);
     await new Promise((r) => setTimeout(r, 100));
-    await registry.get("beta")!.setEnabled(false);
+    const beta = (await gw.servers.list()).find((s) => s.slug === "beta")!;
+    await gw.servers.update(beta.id, { enabled: false });
     await until(() => notified > 0);
-    const names = (await client.listTools()).tools.map((t) => t.name);
-    expect(names).not.toContain("beta__echo");
-    const call = await client.callTool({ name: "beta__echo", arguments: { text: "z" } });
-    expect(call.isError).toBe(true);
-    await registry.get("beta")!.setEnabled(true);
-    await until(() => registry.get("beta")!.status === "connected");
+    expect((await client.listTools()).tools.map((t) => t.name)).not.toContain("beta__echo");
+    expect((await client.callTool({ name: "beta__echo", arguments: { text: "z" } })).isError).toBe(
+      true,
+    );
+    await gw.servers.update(beta.id, { enabled: true });
+    await until(() => gw.registry.get("beta")?.status === "connected");
     await client.close();
   });
 
-  it("never exposes upstream URLs or credentials through the API", async () => {
-    const res = await fetch(`${gatewayUrl}/api/servers`, {
-      headers: { Authorization: `Bearer ${KEY}` },
+  it("rejects a revoked key on the next call, inside an open session, and audits it", async () => {
+    const k = await gw.repo.createApiKey(adminId, "to-revoke", adminId);
+    const client = await connectClient(k.key);
+    await client.callTool({ name: "beta__echo", arguments: { text: "before" } });
+    await gw.repo.revokeApiKey(k.id);
+    await expect(
+      client.callTool({ name: "beta__echo", arguments: { text: "after" } }),
+    ).rejects.toThrow();
+    const rows = await gw.repo.listAudit({ userId: adminId, limit: 20 });
+    expect(rows.some((r) => r.outcome === "auth_rejected" && r.error === "key revoked")).toBe(true);
+  });
+
+  it("binds a session to the key that opened it", async () => {
+    const other = await gw.repo.createApiKey(adminId, "other", adminId);
+    const client = await connectClient();
+    const sessionId = (client.transport as StreamableHTTPClientTransport).sessionId!;
+    const res = await fetch(`${gw.url}/mcp`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${other.key}`,
+        "mcp-session-id": sessionId,
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "mcp-protocol-version": "2025-06-18",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 9, method: "tools/list" }),
     });
-    const text = await res.text();
-    expect(text).not.toContain("alpha-secret");
-    expect(text).not.toContain("127.0.0.1");
+    expect(res.status).toBe(404);
+    await client.close();
+  });
+
+  it("writes an audit row for every call with user, server, tool, duration and outcome", async () => {
+    const client = await connectClient();
+    await client.callTool({ name: "alpha__echo", arguments: { text: "audit" } });
+    await client.close();
+    await until(() => true);
+    const rows = await gw.repo.listAudit({ server: "alpha", limit: 5 });
+    expect(rows[0]).toMatchObject({
+      user_email: "admin@test.dev",
+      via: "mcp",
+      server_slug: "alpha",
+      tool: "echo",
+      outcome: "ok",
+    });
+    expect(typeof rows[0].duration_ms).toBe("number");
   });
 });

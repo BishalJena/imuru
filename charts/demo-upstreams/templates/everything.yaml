@@ -1,0 +1,90 @@
+{{- $labels := dict "app.kubernetes.io/name" "everything" "app.kubernetes.io/instance" .Release.Name }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: everything
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+    app.kubernetes.io/part-of: urumi
+spec:
+  selector: {{- toYaml $labels | nindent 4 }}
+  ports:
+    - name: http
+      port: 3001
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: everything
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+    app.kubernetes.io/part-of: urumi
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- toYaml $labels | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- toYaml $labels | nindent 8 }}
+        app.kubernetes.io/part-of: urumi
+    spec:
+      automountServiceAccountToken: false
+      # Kill-pod demo: a short grace period makes the replacement pod start promptly.
+      terminationGracePeriodSeconds: 5
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: everything
+          image: "{{ .Values.everything.image.repository }}:{{ .Values.everything.image.tag }}"
+          imagePullPolicy: {{ .Values.everything.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3001
+          readinessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 20
+          resources: {{- toYaml .Values.everything.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: tmp, emptyDir: {} }
+{{- if .Values.networkPolicy.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: everything
+spec:
+  podSelector:
+    matchLabels: {{- toYaml $labels | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.gateway.namespace }}
+          podSelector:
+            matchLabels: {{- toYaml .Values.networkPolicy.gateway.podLabels | nindent 14 }}
+      ports:
+        - port: http
+{{- end }}
