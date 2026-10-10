@@ -1,0 +1,34 @@
+# Local working files
+AGENTS.md
+PLAN.md
+DECISIONS.md
+notes/
+Urumi AI FDE Internship*.md
+.devin/
+.cursor/
+.claude/
+graphify-out/
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Secrets and local overrides
+.env
+.env.*
+!.env.example
+charts/**/values-secrets*.yaml
+*.kubeconfig
+kubeconfig*
+
+# Helm
+charts/**/charts/*.tgz
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.log

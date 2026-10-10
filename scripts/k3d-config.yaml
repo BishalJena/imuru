@@ -1,0 +1,23 @@
+# Local cluster. Same k3s version as the VPS (stable channel) so Traefik,
+# local-path storage and the NetworkPolicy controller behave identically.
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: urumi
+servers: 1
+agents: 1
+image: rancher/k3s:v1.36.5-k3s1
+ports:
+  - port: 80:80
+    nodeFilters:
+      - loadbalancer
+  - port: 443:443
+    nodeFilters:
+      - loadbalancer
+options:
+  k3d:
+    wait: true
+    timeout: 180s
+  kubeconfig:
+    updateDefaultKubeconfig: true
+    switchCurrentContext: true
