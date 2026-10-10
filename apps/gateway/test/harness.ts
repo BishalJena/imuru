@@ -10,6 +10,7 @@ import { Repo } from "../src/repo.js";
 import { ServerService } from "../src/servers.js";
 import { UrlGuard } from "../src/ssrf.js";
 import type { LlmProvider } from "../src/llm.js";
+import { Policies } from "../src/policies.js";
 import { listen } from "./helpers.js";
 
 export const ADMIN = { email: "admin@test.dev", password: "admin-password-1" };
@@ -57,7 +58,11 @@ export async function startGateway(
   const urlGuard = new UrlGuard(config.UPSTREAM_ALLOWED_HOSTS);
   const servers = new ServerService(db, sealer, registry, config.UPSTREAM_CONNECT_TIMEOUT_MS);
   const signer = new TokenSigner(config.SESSION_SECRET);
+  let notify = () => {};
+  const policies = new Policies(db, () => notify());
+  await policies.load();
   const app = createApp({
+    policies,
     config,
     registry,
     repo,
@@ -67,6 +72,7 @@ export async function startGateway(
     ...(opts.isAllowed ? { isAllowed: opts.isAllowed } : {}),
     ...(opts.provider ? { provider: opts.provider } : {}),
   });
+  notify = app.locals.notifyToolsChanged as () => void;
   const { server, url } = await listen(app);
   config.SELF_MCP_URL = `${url}/mcp`;
 
@@ -95,6 +101,7 @@ export async function startGateway(
     registry,
     servers,
     sealer,
+    policies,
     signer,
     login,
     async stop() {

@@ -3,6 +3,8 @@ import type { Express, NextFunction, Request, Response } from "express";
 import { apiRouter } from "./api.js";
 import { chatRouter } from "./chat-route.js";
 import type { LlmProvider } from "./llm.js";
+import type { Policies } from "./policies.js";
+import { policyRouter } from "./policy-route.js";
 import { mcpAuth, type Principal } from "./auth.js";
 import type { Config } from "./config.js";
 import type { TokenSigner } from "./crypto.js";
@@ -20,6 +22,7 @@ export interface AppDeps {
   signer: TokenSigner;
   urlGuard: UrlGuard;
   isAllowed?: (principal: Principal, server: string, tool: string) => boolean;
+  policies?: Policies;
   provider?: LlmProvider | null;
   extraApi?: (app: Express) => void;
 }
@@ -49,7 +52,11 @@ export function createApp(deps: AppDeps): Express {
 
   const mcp = mcpRouter(registry, {
     sessionIdleMs: config.SESSION_IDLE_MS,
-    ...(deps.isAllowed ? { isAllowed: deps.isAllowed } : {}),
+    ...(deps.isAllowed
+      ? { isAllowed: deps.isAllowed }
+      : deps.policies
+        ? { isAllowed: deps.policies.isAllowed }
+        : {}),
     onCall: (e) => {
       void repo
         .audit({
@@ -79,6 +86,7 @@ export function createApp(deps: AppDeps): Express {
       maxSteps: config.CHAT_MAX_STEPS,
     }),
   );
+  if (deps.policies) app.use("/api/policies", policyRouter(repo, deps.policies));
   deps.extraApi?.(app);
   app.use(
     "/api",

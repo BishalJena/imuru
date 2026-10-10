@@ -195,6 +195,16 @@ audit_has() { api admin GET "/audit?limit=200" | json "any(r['user_email']=='$ME
 retry 3 audit_has list_orders ok && ok "audit log: user B, woo list_orders, ok" || ko "audit log records user B's call"
 retry 3 audit_has echo unknown_tool && ok "audit log: rejected call to the disabled server" || ko "audit log records the rejected call"
 
+# Tool permissions (opt-in): deny a write tool for members, then remove the rule.
+RULE=$(api admin POST /policies '{"role":"member","server_slug":"woo","tool_pattern":"create_product"}' | json 'd["id"]')
+names=$(tool_names "$SID")
+[[ " $names " != *" woo__create_product "* && " $names " == *" woo__list_orders "* ]] && ok "policy hides woo__create_product from members" || ko "policy hides woo__create_product from members"
+[[ "$(call_tool "$SID" woo__create_product '{"name":"x","regular_price":"1"}' | json 'd["result"]["content"][0]["text"]')" == "Not permitted" ]] \
+  && ok "direct call to a denied tool is rejected" || ko "direct call to a denied tool is rejected"
+retry 3 audit_has create_product denied && ok "audit log: denied call attributed to user B" || ko "audit log records the denied call"
+api admin DELETE "/policies/$RULE" >/dev/null
+[[ " $(tool_names "$SID") " == *" woo__create_product "* ]] && ok "removing the rule restores the tool" || ko "removing the rule restores the tool"
+
 # Revoke: the next call is rejected, even inside the open session.
 KEY_ID=$(api member GET /keys | json '[k["id"] for k in d if k["revoked_at"] is None][0]')
 api admin DELETE "/users/$(api admin GET /users | json "[u['id'] for u in d if u['email']=='$MEMBER_EMAIL'][0]")/keys/$KEY_ID" >/dev/null

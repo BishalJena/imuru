@@ -5,6 +5,7 @@ import { loadConfig } from "./config.js";
 import { Sealer, TokenSigner } from "./crypto.js";
 import { createPool, migrate } from "./db.js";
 import { GeminiProvider } from "./llm.js";
+import { Policies } from "./policies.js";
 import { Registry } from "./registry.js";
 import { Repo } from "./repo.js";
 import { ServerService, type SeedServer } from "./servers.js";
@@ -72,7 +73,12 @@ const provider =
     ? new GeminiProvider(config.GEMINI_API_KEY, config.LLM_MODEL)
     : null;
 if (!provider) console.warn("chat agent disabled: no LLM API key configured");
-const app = createApp({ config, registry, repo, servers, signer, urlGuard, provider });
+// Policy changes push tools/list_changed so clients re-list with the new rules.
+let notifyToolsChanged = () => {};
+const policies = new Policies(db, () => notifyToolsChanged());
+await policies.load();
+const app = createApp({ config, registry, repo, servers, signer, urlGuard, provider, policies });
+notifyToolsChanged = app.locals.notifyToolsChanged as () => void;
 
 const server = app.listen(config.PORT, "0.0.0.0", () => {
   console.log(`gateway listening on :${config.PORT}`);

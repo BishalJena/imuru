@@ -61,6 +61,14 @@ export interface AuditRow {
   error: string | null;
 }
 
+export interface PolicyRule {
+  id: string;
+  role: Role;
+  server_slug: string;
+  tool_pattern: string;
+  created_at: string;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -123,6 +131,11 @@ export const api = {
     request<ApiKey & { key: string }>("POST", `/users/${userId}/keys`, { name }),
   revokeUserKey: (userId: string, keyId: string) =>
     request<void>("DELETE", `/users/${userId}/keys/${keyId}`),
+
+  policies: () => request<PolicyRule[]>("GET", "/policies"),
+  addPolicy: (r: { role: Role; server_slug: string; tool_pattern: string }) =>
+    request<PolicyRule>("POST", "/policies", r),
+  removePolicy: (id: string) => request<void>("DELETE", `/policies/${id}`),
 
   audit: (q: Record<string, string>) =>
     request<AuditRow[]>("GET", `/audit?${new URLSearchParams(q).toString()}`),
