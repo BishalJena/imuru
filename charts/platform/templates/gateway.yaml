@@ -1,0 +1,113 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  labels: {{- include "platform.labels" (dict "ctx" $ "component" "gateway") | nindent 4 }}
+spec:
+  selector: {{- include "platform.selectorLabels" (dict "ctx" $ "component" "gateway") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  labels: {{- include "platform.labels" (dict "ctx" $ "component" "gateway") | nindent 4 }}
+spec:
+  # One replica: MCP sessions live in process memory.
+  replicas: 1
+  selector:
+    matchLabels: {{- include "platform.selectorLabels" (dict "ctx" $ "component" "gateway") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "platform.labels" (dict "ctx" $ "component" "gateway") | nindent 8 }}
+      annotations:
+        checksum/upstreams: {{ toJson .Values.upstreams | sha256sum }}
+        checksum/secrets: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: gateway
+          image: "{{ .Values.gateway.image.repository }}:{{ .Values.gateway.image.tag }}"
+          imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            - name: GATEWAY_API_KEY
+              valueFrom:
+                secretKeyRef: { name: gateway, key: api-key }
+            - name: UPSTREAM_TIMEOUT_MS
+              value: {{ .Values.gateway.upstreamTimeoutMs | quote }}
+            - name: UPSTREAM_CONNECT_TIMEOUT_MS
+              value: {{ .Values.gateway.connectTimeoutMs | quote }}
+            - name: ALLOWED_HOSTS
+              value: {{ printf "%s,gateway,gateway.%[2]s,gateway.%[2]s.svc,gateway.%[2]s.svc.cluster.local,localhost,127.0.0.1" (include "platform.host" .) .Release.Namespace | quote }}
+            - name: HEALTH_INTERVAL_MS
+              value: {{ .Values.gateway.healthIntervalMs | quote }}
+            {{- range .Values.upstreams }}
+            {{- if ne (.auth | default "none") "none" }}
+            - name: {{ include "platform.upstreamEnvName" . }}
+              valueFrom:
+                secretKeyRef: { name: gateway-upstreams, key: {{ .slug }}, optional: true }
+            {{- end }}
+            {{- end }}
+            - name: SEED_UPSTREAMS
+              value: {{ include "platform.seedUpstreams" . | quote }}
+          # Host header set explicitly: kubelet would send the pod IP, which the allowlist rejects.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+              httpHeaders: [{ name: Host, value: localhost }]
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+              httpHeaders: [{ name: Host, value: localhost }]
+            periodSeconds: 20
+          resources: {{- toYaml .Values.gateway.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gateway
+  labels: {{- include "platform.labels" (dict "ctx" $ "component" "gateway") | nindent 4 }}
+  {{- if and .Values.global.tls.enabled .Values.global.tls.clusterIssuer }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ .Values.global.tls.clusterIssuer }}
+  {{- end }}
+spec:
+  ingressClassName: traefik
+  {{- if .Values.global.tls.enabled }}
+  tls:
+    - hosts: [{{ include "platform.host" . }}]
+      secretName: app-tls
+  {{- end }}
+  rules:
+    - host: {{ include "platform.host" . }}
+      http:
+        paths:
+          {{- range list "/mcp" "/api" }}
+          - path: {{ . }}
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port:
+                  name: http
+          {{- end }}

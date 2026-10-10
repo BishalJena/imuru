@@ -50,8 +50,10 @@ export function createApp(
     res.json({ status: "ok" });
   });
 
-  // Ready means the store answers an authenticated request.
-  app.get("/readyz", async (_req, res) => {
+  // Diagnostic only, not a probe: whether the store answers an authenticated
+  // request. Readiness must not depend on the store, or woo-mcp could never
+  // become ready before the bootstrap Job registers its REST key.
+  app.get("/store-health", async (_req, res) => {
     try {
       await woo.get("/data/currencies/current");
       res.json({ status: "ready" });

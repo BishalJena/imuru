@@ -1,0 +1,38 @@
+global:
+  domain: 127.0.0.1.nip.io
+  storageClass: ""
+  tls:
+    enabled: false
+    clusterIssuer: ""
+
+app:
+  # Dashboard, /api and /mcp share one host: <host>.<global.domain>.
+  host: app
+  hostOverride: ""
+
+gateway:
+  image:
+    repository: urumi/gateway
+    tag: dev
+    pullPolicy: IfNotPresent
+  upstreamTimeoutMs: 30000
+  connectTimeoutMs: 5000
+  healthIntervalMs: 5000
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 384Mi }
+
+# Render even if an upstream's source Secret is missing (lint, template). Never set on a real install.
+allowMissingUpstreamSecrets: false
+
+# Servers registered at startup. A credential is either copied from a Secret in
+# another namespace at install time (fromSecret) or supplied out of band.
+upstreams:
+  - slug: woo
+    name: WooCommerce
+    url: http://woo-mcp.store.svc:3000/mcp
+    auth: bearer
+    fromSecret:
+      namespace: store
+      name: woo-mcp
+      key: bearer-token

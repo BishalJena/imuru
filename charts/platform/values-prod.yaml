@@ -1,0 +1,12 @@
+# Set global.domain at install time: --set global.domain=<vps-ip>.sslip.io (or a real domain).
+global:
+  domain: ""
+  storageClass: local-path
+  tls:
+    enabled: true
+    clusterIssuer: letsencrypt-prod
+
+gateway:
+  resources:
+    requests: { cpu: 100m, memory: 192Mi }
+    limits: { cpu: "1", memory: 512Mi }

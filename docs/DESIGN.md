@@ -47,3 +47,40 @@ Authentication uses WooCommerce consumer keys. Over plain HTTP, WooCommerce reje
 - The alternative, sending `X-Forwarded-Proto: https` so that Basic auth is accepted, only works because the WordPress image trusts that header from any client. Building on that would depend on a spoofable header.
 
 The signature covers the site's **home URL**, not the hostname the request was sent to. The client sends requests to `wordpress.<namespace>.svc` but signs them for the public store URL.
+
+## WooCommerce MCP server
+
+`apps/woo-mcp` is an MCP server over Streamable HTTP. It exposes six tools: `get_store_info`, `list_products`, `create_product`, `list_orders`, `get_order` and `update_order_status`. It runs in the store's namespace behind a ClusterIP Service. It has no Ingress and requires a bearer token that only the gateway holds.
+
+- **Stateless transport.** Each POST gets a fresh MCP server and transport. woo-mcp keeps no per-client state, so any replica can serve any request and the gateway needs no session affinity to it.
+- **"Today" is the store's day.** The chart sets the store timezone. `get_store_info` returns the current date and time in that timezone, and `list_orders(date=YYYY-MM-DD)` covers that whole local day. The model never has to work out timezone offsets.
+- **Errors a model can act on.** Store failures become `isError` tool results with one line of text ("Order 123 not found", "Store did not respond within 15s"). Raw WooCommerce responses and stack traces never reach the client. Redirects from the store are refused, not followed.
+- **Readiness checks the process only.** When the store is down, woo-mcp stays in service and answers with a clear error instead of disappearing. Store reachability is reported separately (`/store-health`). The gateway's own health checks track whether woo-mcp itself is reachable.
+- **Host-header allowlist.** The server binds all interfaces in the pod but accepts only its in-cluster Service names in the `Host` header. Kubelet probes send `Host: localhost` explicitly.
+
+## Request flow
+
+A `tools/call` for `woo__list_orders` from an MCP client:
+
+1. The client sends `POST https://app.<domain>/mcp` with `Authorization: Bearer <API key>` and the `Mcp-Session-Id` it received on `initialize`.
+2. Traefik matches the host and the `/mcp` path and forwards the request to the `gateway` Service in `platform`.
+3. The gateway authenticates the key on every request. The session must belong to the same key that opened it; otherwise the gateway answers as if the session did not exist.
+4. The gateway splits the tool name on the first `__` into server slug `woo` and tool `list_orders`. It checks that the server is enabled and that the tool is in its cached tool list.
+5. The gateway's long-lived MCP client for `woo` sends `tools/call list_orders` to `http://woo-mcp.store.svc:3000/mcp` with woo-mcp's bearer token, under a per-call timeout.
+6. woo-mcp validates the arguments, then calls `GET http://wordpress/wp-json/wc/v3/orders` with an OAuth 1.0a signature.
+7. WooCommerce queries MariaDB and returns JSON. woo-mcp reduces it to the contract shape and returns `content` plus `structuredContent`.
+8. The gateway records the call (user, server, tool, outcome, duration) and returns the result unchanged.
+
+Credentials at each hop: the client's API key ends at the gateway. The gateway's token for woo-mcp ends at woo-mcp. woo-mcp's WooCommerce key is never sent; only signatures are. No credential is forwarded beyond the hop it was issued for.
+
+## Gateway: aggregation, routing and failure handling
+
+- **One client per upstream.** The gateway holds one MCP client per enabled upstream server. It caches each server's tool list (refreshed when the upstream sends `tools/list_changed`) and runs a health check every few seconds (`ping`, or reconnect when disconnected). The status shown to admins is `connected`, `unreachable` or `disabled`.
+- **Listing never touches the network.** `tools/list` is served from the cache of connected servers. A dead or slow upstream cannot delay or break listing.
+- **Name collisions.** Every tool is exposed as `<server slug>__<tool name>`, always, not only when a collision exists, so names never change when servers are added. Slugs match `^[a-z][a-z0-9-]{1,30}$` and cannot contain `__`. The name is split on the first `__`, so upstream tool names may themselves contain `__`. Descriptions are prefixed with `[<server name>]`.
+- **Timeouts and failures.**
+  - Every upstream call has a timeout. A timeout returns an `isError` result such as "WooCommerce did not respond within 30s".
+  - An unreachable server returns "<server> is unreachable" and triggers an immediate re-check.
+  - Calls to other servers are unaffected; tested with a deliberately slow upstream next to a healthy one.
+- **Tools disappear when a server goes away.** The gateway's MCP endpoint is stateful (one session per client), so it can push `notifications/tools/list_changed` to every connected client when a server is disabled, removed, goes down or comes back. Clients then re-list and the tools are gone. A call that names a disabled server's tool is rejected even if a client cached the old list.
+- **Credentials stay in the gateway.** Each upstream's static credential (bearer token or a named header) is attached only to that upstream's requests. The API returns server status and tool names, never URLs or credentials. Redirects from upstreams are refused, so an upstream cannot bounce the gateway, and its credential, to another host.

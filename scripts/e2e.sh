@@ -7,6 +7,8 @@ set -euo pipefail
 DOMAIN="${DOMAIN:-127.0.0.1.nip.io}"
 STORE_NS="${STORE_NS:-store}"
 STORE_URL="${STORE_URL:-http://store.${DOMAIN}}"
+PLATFORM_NS="${PLATFORM_NS:-platform}"
+APP_URL="${APP_URL:-http://app.${DOMAIN}}"
 
 pass=0
 fail=0
@@ -88,6 +90,66 @@ retry 15 check_storefront && ok "storefront returns 200" || ko "storefront retur
 retry 5 check_products && ok "shop lists products" || ko "shop lists products"
 retry 3 check_cod_order && ok "COD checkout creates order #${E2E_ORDER} visible to admin API" \
   || ko "COD checkout creates an order visible to admin API"
+
+GATEWAY_KEY=$(kubectl -n "$PLATFORM_NS" get secret gateway -o jsonpath='{.data.api-key}' | base64 -d)
+
+# mcp <session-id|""> <json-rpc body>: POST to the gateway; prints the JSON-RPC
+# payload (unwrapping single-event SSE framing). With an empty session id, prints
+# the new session id instead.
+mcp() {
+  local sid=$1 body=$2 headers out
+  headers=$(mktemp)
+  out=$(curl -s -D "$headers" "$APP_URL/mcp" -H "Authorization: Bearer $GATEWAY_KEY" \
+    ${sid:+-H "Mcp-Session-Id: $sid"} -H 'MCP-Protocol-Version: 2025-06-18' \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d "$body")
+  if [[ -z "$sid" ]]; then
+    awk 'tolower($1)=="mcp-session-id:" {print $2}' "$headers" | tr -d '\r'
+  else
+    sed -n 's/^data: //p' <<<"$out"
+  fi
+  rm -f "$headers"
+}
+
+mcp_session() {
+  local sid
+  sid=$(mcp "" '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"e2e","version":"1"}}}')
+  [[ -n "$sid" ]] || return 1
+  mcp "$sid" '{"jsonrpc":"2.0","method":"notifications/initialized"}' >/dev/null
+  echo "$sid"
+}
+
+check_gateway_rejects_no_key() {
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$APP_URL/mcp")" == 401 ]]
+}
+
+check_gateway_woo_connected() {
+  curl -sf "$APP_URL/api/servers" -H "Authorization: Bearer $GATEWAY_KEY" \
+    | json '[s for s in d if s["slug"] == "woo"][0]["status"]' | grep -qx connected
+}
+
+check_gateway_lists_woo_tools() {
+  local sid
+  sid=$(mcp_session) || return 1
+  mcp "$sid" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+    | json '",".join(sorted(t["name"] for t in d["result"]["tools"] if t["name"].startswith("woo__")))' \
+    | grep -qx 'woo__create_product,woo__get_order,woo__get_store_info,woo__list_orders,woo__list_products,woo__update_order_status'
+}
+
+check_gateway_orders_today() {
+  local sid today
+  sid=$(mcp_session) || return 1
+  today=$(mcp "$sid" '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"woo__get_store_info","arguments":{}}}' \
+    | json 'd["result"]["structuredContent"]["today"]') || return 1
+  mcp "$sid" "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"woo__list_orders\",\"arguments\":{\"date\":\"$today\"}}}" \
+    | json '[o["id"] for o in d["result"]["structuredContent"]["items"]]' | grep -q "${E2E_ORDER:-}"
+}
+
+echo
+echo "gateway ($APP_URL)"
+retry 3 check_gateway_rejects_no_key && ok "/mcp rejects a request without an API key" || ko "/mcp rejects a request without an API key"
+retry 15 check_gateway_woo_connected && ok "woo upstream is connected" || ko "woo upstream is connected"
+retry 5 check_gateway_lists_woo_tools && ok "tools/list returns the six woo__ tools" || ko "tools/list returns the six woo__ tools"
+retry 5 check_gateway_orders_today && ok "woo__list_orders(today) returns order #${E2E_ORDER:-?}" || ko "woo__list_orders(today) returns the e2e order"
 
 echo
 echo "$pass passed, $fail failed"
