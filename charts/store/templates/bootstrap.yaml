@@ -22,7 +22,9 @@ metadata:
   name: bootstrap
   labels: {{- include "store.labels" (dict "ctx" $ "component" "bootstrap") | nindent 4 }}
   annotations:
-    helm.sh/hook: post-install,post-upgrade
+    # post-rollback too: a rollback restores Kubernetes objects, not database
+    # state, so the Job re-applies the rolled-back values to WordPress.
+    helm.sh/hook: post-install,post-upgrade,post-rollback
     helm.sh/hook-weight: "0"
     # Keep the last run (and its logs) until the next upgrade replaces it.
     helm.sh/hook-delete-policy: before-hook-creation

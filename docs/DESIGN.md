@@ -1,5 +1,20 @@
 # System design and tradeoffs
 
+## Architecture choices
+
+| Decision                                                                                     | Why                                                                                                                                                                    | Rejected                                                                                                         |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **k3d locally, k3s on the VPS**                                                              | Same distribution in both places: same Traefik, same `local-path` storage, same embedded NetworkPolicy controller. "Values only" holds in practice, not only on paper. | kind/minikube: a different ingress controller and storage class from production.                                 |
+| **Traefik Ingress** (k3s default), standard `networking.k8s.io/v1` objects                   | Ships with k3s and is maintained. The Ingress objects stay portable.                                                                                                   | ingress-nginx (retired).                                                                                         |
+| **Own charts on official images** (`wordpress`, `mariadb`, `postgres`, `nginx-unprivileged`) | Small enough to explain line by line. No dependency on vendor chart conventions.                                                                                       | Bitnami charts and images (paywalled).                                                                           |
+| **Three charts, three namespaces** (`store`, `platform`, `demo-upstreams`)                   | Each concern is an independently upgradable release. The store chart can be installed once per namespace. NetworkPolicies are written per namespace.                   | One umbrella chart: one namespace, one blast radius.                                                             |
+| **One public host for dashboard, `/api` and `/mcp`**                                         | Same origin, so no CORS. Session cookies can be `SameSite=Lax`.                                                                                                        | Separate API host.                                                                                               |
+| **woo-mcp uses the WooCommerce REST API**                                                    | Versioned, documented, and runs WooCommerce's own validation and hooks. It works over the network, so woo-mcp is an ordinary Deployment.                               | WP-CLI (needs exec into the WordPress pod or a shared volume); direct SQL (bypasses WooCommerce business logic). |
+| **Tool names are always `<server>__<tool>`**                                                 | Deterministic and collision-proof, and a name never changes when another server is added.                                                                              | Prefix only on collision: names change under connected clients.                                                  |
+| **Stateful gateway sessions**                                                                | Lets the gateway push `tools/list_changed` when servers are disabled or go down.                                                                                       | Stateless: scales trivially but cannot notify clients.                                                           |
+| **Chat agent is an MCP client of the gateway's own `/mcp`**                                  | Same authentication, permissions and audit path as external clients. Proves that nothing else talks to upstreams.                                                      | In-process function calls that bypass the protocol path.                                                         |
+| **Postgres for gateway state, plain SQL migrations**                                         | Transactions, constraints and an advisory lock for migrations, with no ORM to explain.                                                                                 | SQLite (single writer, file on a PVC); an ORM.                                                                   |
+
 ## Store on Kubernetes
 
 `charts/store` deploys one WooCommerce store into its own namespace. Resource names are fixed (`mariadb`, `wordpress`, `woo-rest`) and the namespace provides uniqueness, so every store has the same in-cluster DNS shape (`wordpress.<namespace>.svc`). Two releases of the chart cannot share a namespace; that is intended.
@@ -84,3 +99,87 @@ Credentials at each hop: the client's API key ends at the gateway. The gateway's
   - Calls to other servers are unaffected; tested with a deliberately slow upstream next to a healthy one.
 - **Tools disappear when a server goes away.** The gateway's MCP endpoint is stateful (one session per client), so it can push `notifications/tools/list_changed` to every connected client when a server is disabled, removed, goes down or comes back. Clients then re-list and the tools are gone. A call that names a disabled server's tool is rejected even if a client cached the old list.
 - **Credentials stay in the gateway.** Each upstream's static credential (bearer token or a named header) is attached only to that upstream's requests. The API returns server status and tool names, never URLs or credentials. Redirects from upstreams are refused, so an upstream cannot bounce the gateway, and its credential, to another host.
+
+## Kubernetes layout
+
+| Workload   | Kind                         | Requests / limits       | Readiness                                       | Liveness                   |
+| ---------- | ---------------------------- | ----------------------- | ----------------------------------------------- | -------------------------- |
+| MariaDB    | StatefulSet, PVC             | 100m/256Mi, 1 CPU/1Gi   | `healthcheck.sh --connect --innodb_initialized` | `healthcheck.sh --connect` |
+| WordPress  | Deployment (`Recreate`), PVC | 100m/256Mi, 1 CPU/768Mi | `GET /wp-login.php`                             | TCP :80                    |
+| bootstrap  | Job (Helm hook)              | 100m/256Mi, 1 CPU/768Mi | n/a (runs to completion)                        | n/a                        |
+| woo-mcp    | Deployment                   | 50m/96Mi, 500m/256Mi    | `GET /healthz`                                  | `GET /healthz`             |
+| gateway    | Deployment                   | 50m/128Mi, 500m/384Mi   | `GET /readyz` (database reachable)              | `GET /healthz`             |
+| dashboard  | Deployment                   | 10m/16Mi, 200m/64Mi     | `GET /healthz`                                  | `GET /healthz`             |
+| Postgres   | StatefulSet, PVC             | 50m/128Mi, 1 CPU/512Mi  | `pg_isready`                                    | `pg_isready`               |
+| everything | Deployment                   | 25m/96Mi, 300m/256Mi    | TCP :3001                                       | TCP :3001                  |
+
+Readiness never depends on another service's health. woo-mcp stays ready when WordPress is down and answers "Store is unreachable". The gateway stays ready when an upstream dies and marks only that server as unreachable. A downstream outage therefore surfaces as a clear error, not as a missing endpoint, and a fresh install cannot deadlock on hook ordering.
+
+**Public versus internal.**
+
+- Public, through Ingress: only `store.<domain>` (WordPress) and `app.<domain>` (dashboard, `/api`, `/mcp`).
+- Internal: everything else uses ClusterIP Services and is fenced by NetworkPolicies.
+  - Every application namespace denies all ingress and egress by default and then allows exactly these paths: Traefik → WordPress, dashboard and gateway; WordPress → MariaDB; woo-mcp → WordPress; gateway → Postgres, the upstream namespaces and public addresses.
+  - woo-mcp additionally requires the gateway's bearer token.
+- `scripts/e2e.sh` proves isolation with connection probes and positive controls. For example, woo-mcp is unreachable from `default` and from other pods in `store`, the gateway cannot reach the Kubernetes API, and woo-mcp has no internet egress.
+
+**Secrets.**
+
+- Every credential is a Kubernetes Secret, generated by Helm on first install (`randAlphaNum`), read back with `lookup` on upgrade, and kept on uninstall (`helm.sh/resource-policy: keep`). The volumes outlive releases, and the credentials baked into them must too.
+- The gateway gets woo-mcp's token by copying it at install time from `store/woo-mcp`, because pods cannot reference Secrets across namespaces.
+- No credential appears in values files, the repository, or command lines.
+
+## Identity, access and audit
+
+- **Dashboard.** Email and password (scrypt), with an httpOnly `SameSite=Lax` session cookie (`Secure` over TLS). Members join through single-use invite links. There are two roles, `admin` and `member`.
+- **API keys.** `urk_<id>_<secret>` with a 256-bit secret. Stored as key id plus SHA-256(secret), shown once, revocable by the owner or an admin. A fast hash is correct for high-entropy random secrets; a slow KDF would only add latency to every MCP request.
+- **Checked on every MCP request.** A revoked key fails on its next call, even inside an open session. Sessions are bound to the key that opened them.
+- **Audit log.** One row per tool call: user, key, `via` (mcp or chat), server, tool, duration, and an outcome of `ok`, `tool_error`, `timeout`, `unreachable`, `unknown_tool`, `denied` or `auth_rejected`, with error text. Use of a revoked key is attributed to its owner. Members see their own rows; admins see all rows.
+- **Tool permissions.** Deny rules per role, with `*` wildcards. The default allows everything. A denied tool is hidden from that role's `tools/list` and rejected when called, for external clients and the chat agent alike.
+- **Upstream credentials.** AES-256-GCM in Postgres, with the key in a Secret. Write-only in the API, decrypted only to build that upstream's client.
+
+## Chat agent
+
+`POST /api/chat` (dashboard session) runs this loop and streams each step to the browser as server-sent events:
+
+1. Mint a 5-minute token for the logged-in user (HMAC-signed `{uid, exp}`).
+2. Connect an MCP client to the gateway's own `/mcp` with that token, and call `tools/list`. The list is fresh every turn, so the agent sees exactly that user's permitted, currently enabled tools.
+3. Send the conversation and the tool declarations to Gemini. Each function call the model returns is executed with `tools/call`, and the result goes back to the model. This repeats until the model answers or `llm.maxSteps` (8) is reached.
+4. Stream `tool_call`, `tool_result`, `message` and `error` events. The UI renders each tool call as a card with arguments, result and duration.
+
+Every call made by the agent goes through the same authentication, permission checks and audit path as an external client, so it appears in the audit log under the user with `via = chat`. The system prompt tells the model to treat tool descriptions and results as untrusted data. The step cap bounds runaway loops.
+
+## What changes for production
+
+All differences are Helm values; the templates are the same.
+
+| Concern       | Local (`values-local.yaml`)                                 | VPS (`values-prod.yaml` + `--set`)                                                                                                                                                                 |
+| ------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DNS           | `*.127.0.0.1.nip.io` resolves to localhost                  | `*.<domain>` A record to the VM, or `<ip>.sslip.io`                                                                                                                                                |
+| Ingress       | Traefik over HTTP                                           | Traefik with TLS from cert-manager (`letsencrypt-prod`, HTTP-01). The Ingress gets a `cert-manager.io/cluster-issuer` annotation and a `tls` block. URLs and cookies switch to https and `Secure`. |
+| Storage class | `local-path`, small PVCs                                    | `local-path` on single-node k3s, larger PVCs. On a managed cluster, set `global.storageClass` to the provider's CSI class.                                                                         |
+| Images        | built and imported into k3d                                 | multi-arch images in a registry (`make push`), repository set with `--set`                                                                                                                         |
+| Secrets       | generated in-cluster; LLM key from a gitignored values file | same. Production values come from a separate gitignored file or `--set`; a sealed-secrets or external-secrets controller is the next step for a team.                                              |
+| Resources     | small                                                       | larger requests and limits                                                                                                                                                                         |
+
+One production detail: WooCommerce verifies OAuth signatures against its home URL using the scheme of the incoming request. TLS ends at Traefik and in-cluster requests are plain HTTP, so woo-mcp signs for `http://<store host>` even when the site is served over HTTPS.
+
+**Upgrades and rollback.**
+
+- Image tags are content hashes of each component's sources, so `helm upgrade` restarts only what changed.
+- Store: the bootstrap Job runs on `post-install`, `post-upgrade` and `post-rollback`. A rollback restores Kubernetes objects but not database state, so the Job re-applies the rolled-back values (WooCommerce version, title, settings) to WordPress.
+- Gateway: migrations are additive and run under an advisory lock, so a rollback to an older image runs against the newer schema.
+- `helm rollback` never deletes PVC data.
+
+**Scaling the gateway.** It runs one replica because MCP sessions and the in-memory rate limiter live in the process. Running several replicas needs session affinity on `Mcp-Session-Id` at the Ingress, or a shared session store, plus a shared rate limiter. Upstream clients and the tool cache are per replica and need no coordination.
+
+## Testing
+
+- **Unit and integration tests** (`make check`):
+  - woo-mcp: OAuth signature against a known-good vector, the REST client's error mapping, and protocol-level tests over HTTP.
+  - gateway: runs against a real Postgres and real in-process MCP servers that are slow, dead or have colliding names. Covers auth, roles, revocation inside a session, session binding, audit, encrypted credentials, the SSRF guard, timeouts, `list_changed`, tool permissions, and the chat loop with a scripted model.
+- **End to end** (`make e2e`), against the running cluster:
+  - The store checkout with COD.
+  - The two-user gateway flow: invite, own key, all servers' tools, orders today, routing, disable/enable, kill-pod and recovery, permissions, revoke, audit attribution.
+  - Network isolation and egress checks.
+- **From scratch:** `make cluster-down && make cluster-up && make deploy-local && make e2e` reproduces everything with no manual steps.

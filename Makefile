@@ -9,7 +9,7 @@ GATEWAY_TAG := $(call src_hash,apps/gateway)
 DASHBOARD_TAG := $(call src_hash,apps/dashboard)
 EVERYTHING_TAG := 2026.8.31
 
-.PHONY: help install typecheck lint test check cluster-up cluster-down deploy-store deploy-upstreams deploy-platform deploy-local helm-lint e2e images
+.PHONY: help install typecheck lint test check cluster-up cluster-down deploy-store deploy-upstreams deploy-platform deploy-local push deploy-prod helm-lint e2e images
 
 help:
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -68,3 +68,32 @@ deploy-local: images deploy-store deploy-upstreams deploy-platform ## Build imag
 
 e2e: ## Run end-to-end checks against the local cluster
 	scripts/e2e.sh
+
+# --- Production-like (k3s VPS) ---------------------------------------------
+# REGISTRY: image registry prefix, e.g. ghcr.io/<github-user>/urumi
+# DOMAIN:   base domain whose *.DOMAIN points at the VPS, e.g. 203.0.113.10.sslip.io
+REGISTRY ?=
+DOMAIN ?=
+PLATFORMS ?= linux/amd64,linux/arm64
+
+push: ## Build multi-arch images and push them to $(REGISTRY)
+	@test -n "$(REGISTRY)" || (echo "set REGISTRY=ghcr.io/<user>/urumi" && exit 1)
+	docker buildx build --platform $(PLATFORMS) -f apps/woo-mcp/Dockerfile -t $(REGISTRY)/woo-mcp:$(WOO_MCP_TAG) --push .
+	docker buildx build --platform $(PLATFORMS) -f apps/gateway/Dockerfile -t $(REGISTRY)/gateway:$(GATEWAY_TAG) --push .
+	docker buildx build --platform $(PLATFORMS) -f apps/dashboard/Dockerfile -t $(REGISTRY)/dashboard:$(DASHBOARD_TAG) --push .
+	docker buildx build --platform $(PLATFORMS) -f images/everything/Dockerfile -t $(REGISTRY)/everything:$(EVERYTHING_TAG) --push images/everything
+
+PROD_SECRETS := $(wildcard charts/platform/values-secrets.prod.yaml)
+
+deploy-prod: ## Deploy all charts with values-prod.yaml to the current kube context
+	@test -n "$(REGISTRY)" -a -n "$(DOMAIN)" || (echo "set REGISTRY=... DOMAIN=..." && exit 1)
+	helm upgrade --install store charts/store -n store --create-namespace -f charts/store/values-prod.yaml \
+		--set global.domain=$(DOMAIN) --set wooMcp.image.repository=$(REGISTRY)/woo-mcp --set wooMcp.image.tag=$(WOO_MCP_TAG) \
+		--wait --timeout $(HELM_TIMEOUT)
+	helm upgrade --install demo-upstreams charts/demo-upstreams -n demo-upstreams --create-namespace -f charts/demo-upstreams/values-prod.yaml \
+		--set everything.image.repository=$(REGISTRY)/everything --wait --timeout $(HELM_TIMEOUT)
+	helm upgrade --install platform charts/platform -n platform --create-namespace -f charts/platform/values-prod.yaml \
+		$(if $(PROD_SECRETS),-f $(PROD_SECRETS)) --set global.domain=$(DOMAIN) \
+		--set gateway.image.repository=$(REGISTRY)/gateway --set gateway.image.tag=$(GATEWAY_TAG) \
+		--set dashboard.image.repository=$(REGISTRY)/dashboard --set dashboard.image.tag=$(DASHBOARD_TAG) \
+		--wait --timeout $(HELM_TIMEOUT)

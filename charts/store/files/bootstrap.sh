@@ -37,6 +37,7 @@ wp plugin is-active woocommerce || wp plugin activate woocommerce
 # /wp-json/ routes need pretty permalinks; --hard writes Apache's .htaccess.
 wp rewrite structure '/%postname%/' --hard
 
+wp option update blogname "$SITE_TITLE"
 wp option update timezone_string "$STORE_TIMEZONE"
 wp option update woocommerce_default_country "$STORE_COUNTRY"
 wp option update woocommerce_currency "$STORE_CURRENCY"

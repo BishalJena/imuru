@@ -6,9 +6,6 @@ global:
     enabled: true
     clusterIssuer: letsencrypt-prod
 
-store:
-  adminEmail: ""
-
 mariadb:
   persistence:
     size: 10Gi
