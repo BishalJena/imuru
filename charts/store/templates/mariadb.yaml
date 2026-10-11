@@ -26,6 +26,7 @@ spec:
     metadata:
       labels: {{- include "store.labels" (dict "ctx" $ "component" "mariadb") | nindent 8 }}
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: mariadb
           image: "{{ .Values.mariadb.image.repository }}:{{ .Values.mariadb.image.tag }}"

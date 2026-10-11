@@ -36,6 +36,7 @@ spec:
       labels: {{- include "store.labels" (dict "ctx" $ "component" "bootstrap") | nindent 8 }}
     spec:
       restartPolicy: Never
+      automountServiceAccountToken: false
       securityContext:
         # Match www-data in the Debian-based WordPress image that owns the volume.
         runAsUser: 33

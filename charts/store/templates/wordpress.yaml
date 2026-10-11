@@ -43,6 +43,7 @@ spec:
       annotations:
         checksum/config: {{ include "store.wordpressEnv" . | sha256sum }}
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: wordpress
           image: "{{ .Values.wordpress.image.repository }}:{{ .Values.wordpress.image.tag }}"

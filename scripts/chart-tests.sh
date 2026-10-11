@@ -30,6 +30,20 @@ check "store without TLS renders no solver policy" \
 # py <python expression over `t`, the rendered text>: structural assertions without a YAML parser.
 py() { python3 -c "import re,sys; t=sys.stdin.read(); sys.exit(0 if ($1) else 1)"; }
 
+provisioner_namespace_verbs() {
+  doc "$platform_tls" ClusterRole urumi-provisioner | grep -q 'verbs: \[get, list, create, patch, delete\]'
+}
+check "provisioner namespace verbs are get, list, create, patch, delete" provisioner_namespace_verbs
+# Store workloads never call the Kubernetes API, so they must not get a token.
+store_pods_no_token() {
+  local kind name
+  for kind_name in "Deployment wordpress" "StatefulSet mariadb" "Job bootstrap"; do
+    read -r kind name <<<"$kind_name"
+    doc "$store_tls" "$kind" "$name" | grep -q "automountServiceAccountToken: false" || return 1
+  done
+}
+check "store workloads do not mount a ServiceAccount token (wordpress, mariadb, bootstrap)" store_pods_no_token
+
 check "provisioner may reach the API server on 6443 at any address (public node IPs)" \
   py "re.search(r'- ports:\n\s+- port: 6443', t)" <<<"$(doc "$platform_tls" NetworkPolicy provisioner)"
 check "every workload container sets requests and limits" \

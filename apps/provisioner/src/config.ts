@@ -1,9 +1,12 @@
+import { readFileSync } from "node:fs";
 import * as z from "zod/v4";
 
 const schema = z.object({
   GATEWAY_INTERNAL_URL: z.url(),
   INTERNAL_TOKEN: z.string().min(32),
   CHART_PATH: z.string().default("/charts/store"),
+  // Set from the chart's Chart.yaml at startup (see index.ts), not from the environment.
+  STORE_CHART_REVISION: z.string().default(""),
   // Public hostname of a store: <slug><HOST_SUFFIX>.<DOMAIN>
   DOMAIN: z.string().min(1),
   HOST_SUFFIX: z.string().default("-shop"),
@@ -23,6 +26,14 @@ const schema = z.object({
 });
 
 export type Config = z.infer<typeof schema>;
+
+/** The `version` field of a chart's Chart.yaml. */
+export function readChartVersion(chartPath: string): string {
+  const text = readFileSync(`${chartPath}/Chart.yaml`, "utf8");
+  const match = /^version:\s*"?([^"\s]+)"?\s*$/m.exec(text);
+  if (!match) throw new Error(`no version in ${chartPath}/Chart.yaml`);
+  return match[1]!;
+}
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const parsed = schema.safeParse(env);

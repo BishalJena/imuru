@@ -194,6 +194,16 @@ describe("InClusterKube", () => {
     "POST /api/v1/namespaces": [409, { message: "already exists" }],
     "POST /apis/rbac.authorization.k8s.io/v1/namespaces/store-a/rolebindings": [201, {}],
     "DELETE /api/v1/namespaces/store-a": [202, {}],
+    "GET /api/v1/namespaces?labelSelector=urumi.io%2Fstore%3Dtrue": [
+      200,
+      {
+        items: [
+          { metadata: { name: "store-a", labels: { "urumi.io/store": "true" } } },
+          { metadata: { name: "store-b" } },
+        ],
+      },
+    ],
+    "PATCH /api/v1/namespaces/store-a": [200, {}],
     "GET /api/v1/namespaces/store-a/secrets/woo-mcp": [
       200,
       { data: { "bearer-token": Buffer.from("tok-123").toString("base64") } },
@@ -244,6 +254,32 @@ describe("InClusterKube", () => {
     ).resolves.toBeUndefined();
     expect(JSON.parse(seen.at(-1)!.body)).toEqual({
       metadata: { name: "store-a", labels: { "urumi.io/store": "true" } },
+    });
+  });
+
+  it("refuses names that would change the request path", async () => {
+    const before = seen.length;
+    await expect(kube().namespacePhase("../secrets")).rejects.toThrow(/not a valid name/);
+    await expect(kube().deleteNamespace("store-a/../../x")).rejects.toThrow(/not a valid name/);
+    await expect(kube().readSecret("store-a", "a?b=c")).rejects.toThrow(/not a valid name/);
+    expect(seen.length).toBe(before);
+  });
+
+  it("lists store namespaces with their labels", async () => {
+    expect(await kube().storeNamespaces()).toEqual([
+      { name: "store-a", labels: { "urumi.io/store": "true" }, phase: "Active" },
+      { name: "store-b", labels: {}, phase: "Active" },
+    ]);
+  });
+
+  it("labels a namespace with a merge patch", async () => {
+    await kube().labelNamespace("store-a", { "pod-security.kubernetes.io/warn": "restricted" });
+    expect(seen.at(-1)).toMatchObject({
+      method: "PATCH",
+      url: "/api/v1/namespaces/store-a",
+      body: JSON.stringify({
+        metadata: { labels: { "pod-security.kubernetes.io/warn": "restricted" } },
+      }),
     });
   });
 

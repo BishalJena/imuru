@@ -1,10 +1,11 @@
-import { loadConfig } from "./config.js";
+import { loadConfig, readChartVersion } from "./config.js";
 import { GatewayClient } from "./gateway.js";
 import { HelmCli } from "./helm.js";
 import { InClusterKube } from "./k8s.js";
 import { Reconciler } from "./reconcile.js";
 
-const cfg = loadConfig();
+const loaded = loadConfig();
+const cfg = { ...loaded, STORE_CHART_REVISION: readChartVersion(loaded.CHART_PATH) };
 const reconciler = new Reconciler(
   cfg,
   new GatewayClient(cfg.GATEWAY_INTERNAL_URL, cfg.INTERNAL_TOKEN),

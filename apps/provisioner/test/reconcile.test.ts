@@ -10,6 +10,7 @@ const cfg = {
   GATEWAY_INTERNAL_URL: "http://gw",
   INTERNAL_TOKEN: "t".repeat(40),
   CHART_PATH: "/charts/store",
+  STORE_CHART_REVISION: "2.0.0",
   DOMAIN: "127.0.0.1.nip.io",
   HOST_SUFFIX: "-shop",
   TLS_ENABLED: "false",
@@ -30,15 +31,22 @@ function fakes(
   work: StoreWork[],
   opts: {
     helmFails?: string;
+    /** Fails the next helm call only. */
+    helmFailsOnce?: string | undefined;
     releaseStatus?: string;
     /** Installs for these slugs wait until release(slug) is called. */
     holdInstall?: string[];
     terminating?: string[];
     cancelled?: string[];
+    /** Store namespaces that already exist, created before labels were managed. */
+    existing?: { name: string; labels: Record<string, string> }[];
   } = {},
 ) {
   const calls: string[] = [];
   const namespaces = new Set<string>();
+  const nsLabels = new Map<string, Record<string, string>>(
+    (opts.existing ?? []).map((n) => [n.name, n.labels]),
+  );
   const held = new Map<string, () => void>();
   const released = new Set<string>();
   // Release may arrive before the install reaches its hold point.
@@ -58,10 +66,24 @@ function fakes(
     namespacePhase: async (n) =>
       opts.terminating?.includes(n) ? "Terminating" : namespaces.has(n) ? "Active" : null,
     createNamespace: async (n, labels) =>
-      void (namespaces.add(n), calls.push(`ns ${n} ${labels["urumi.io/store"]}`)),
+      void (namespaces.add(n),
+      nsLabels.set(n, labels),
+      calls.push(`ns ${n} ${labels["urumi.io/store"]}`)),
     deleteNamespace: async (n) => void (namespaces.delete(n), calls.push(`delete-ns ${n}`)),
     ensureRoleBinding: async (n, _name, role) => void calls.push(`rb ${n} ${role}`),
     readSecret: async () => ({ "bearer-token": "tok" }),
+    storeNamespaces: async () =>
+      [...nsLabels]
+        .filter(([, l]) => l["urumi.io/store"] === "true")
+        .map(([name, labels]) => ({
+          name,
+          labels,
+          phase: opts.terminating?.includes(name) ? "Terminating" : "Active",
+        })),
+    labelNamespace: async (n, labels) => {
+      nsLabels.set(n, { ...(nsLabels.get(n) ?? {}), ...labels });
+      calls.push(`label ${n}`);
+    },
   };
   const helm: Helm = {
     upgradeInstall: async (release_, _c, ns, sets) => {
@@ -69,6 +91,11 @@ function fakes(
         `helm install ${release_} ${ns} ${sets["store.hostOverride"]} guardrails=${sets["guardrails.enabled"]} tls=${sets["global.tls.enabled"]}`,
       );
       if (opts.helmFails) throw new Error(opts.helmFails);
+      if (opts.helmFailsOnce) {
+        const message = opts.helmFailsOnce;
+        opts.helmFailsOnce = undefined;
+        throw new Error(message);
+      }
       const slug = release_.replace(/^store-/, "");
       if (opts.holdInstall?.includes(slug) && !released.has(slug))
         await new Promise<void>((r) => held.set(slug, r));
@@ -81,6 +108,7 @@ function fakes(
   return {
     calls,
     namespaces,
+    nsLabels,
     release,
     r: new Reconciler(cfg, gateway, kube, helm, () => undefined),
   };
@@ -105,9 +133,68 @@ describe("Reconciler", () => {
       "rb store-alpha urumi-store-manager",
       "helm install store-alpha store-alpha alpha-shop.127.0.0.1.nip.io guardrails=true tls=false",
       "installed store-alpha",
+      "label store-alpha",
       "register store-alpha http://woo-mcp.store-alpha.svc:3000/mcp tok",
       "report s1 ready  http://alpha-shop.127.0.0.1.nip.io",
     ]);
+  });
+
+  it("labels store namespaces for Pod Security admission", async () => {
+    const { nsLabels, r } = fakes([store({})]);
+    await r.tick();
+    await r.idle();
+    expect(nsLabels.get("store-alpha")).toMatchObject({
+      "pod-security.kubernetes.io/enforce": "baseline",
+      "pod-security.kubernetes.io/enforce-version": "latest",
+      "pod-security.kubernetes.io/warn": "restricted",
+    });
+  });
+
+  it("backfills labels and upgrades stores whose chart revision is behind, then records it", async () => {
+    const { calls, nsLabels, r } = fakes([], {
+      existing: [
+        { name: "store-old", labels: { "urumi.io/store": "true" } },
+        {
+          name: "store-current",
+          labels: {
+            "urumi.io/store": "true",
+            "app.kubernetes.io/part-of": "urumi",
+            "pod-security.kubernetes.io/enforce": "baseline",
+            "pod-security.kubernetes.io/enforce-version": "latest",
+            "pod-security.kubernetes.io/warn": "restricted",
+            "urumi.io/chart-revision": "2.0.0",
+          },
+        },
+      ],
+    });
+    await r.tick();
+    expect(nsLabels.get("store-old")).toMatchObject({
+      "pod-security.kubernetes.io/enforce": "baseline",
+      "urumi.io/chart-revision": "2.0.0",
+    });
+    expect(calls.filter((c) => c.startsWith("helm install store-old"))).toHaveLength(1);
+    expect(calls.some((c) => c.includes("store-current"))).toBe(false);
+  });
+
+  it("never upgrades a store namespace that is terminating", async () => {
+    const { calls, r } = fakes([], {
+      terminating: ["store-gone"],
+      existing: [{ name: "store-gone", labels: { "urumi.io/store": "true" } }],
+    });
+    await r.tick();
+    expect(calls.some((c) => c.startsWith("helm install store-gone"))).toBe(false);
+  });
+
+  it("retries the backfill on the next tick when an upgrade fails", async () => {
+    const { calls, nsLabels, r } = fakes([], {
+      existing: [{ name: "store-flaky", labels: { "urumi.io/store": "true" } }],
+      helmFailsOnce: "upgrade timed out",
+    });
+    await r.tick();
+    expect(nsLabels.get("store-flaky")?.["urumi.io/chart-revision"]).toBeUndefined();
+    await r.tick();
+    expect(nsLabels.get("store-flaky")?.["urumi.io/chart-revision"]).toBe("2.0.0");
+    expect(calls.filter((c) => c.startsWith("helm install store-flaky"))).toHaveLength(2);
   });
 
   it("fails cleanly with helm's reason", async () => {

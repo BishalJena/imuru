@@ -80,6 +80,12 @@ out=$(kubectl create namespace evil-ns --as="$SA" 2>&1 || true)
 [[ "$out" == *"store-* namespaces"* ]] && ok "admission policy blocks a non-store namespace" || ko "admission policy blocks a non-store namespace" "$out"
 out=$(kubectl -n "$PLATFORM_NS" create rolebinding sneak --clusterrole=urumi-store-manager --serviceaccount="$PLATFORM_NS:provisioner" --as="$SA" 2>&1 || true)
 [[ "$out" == *"RoleBindings in store-*"* ]] && ok "admission policy blocks binding itself into platform" || ko "admission policy blocks rolebinding in platform" "$out"
+# The provisioner may patch namespaces (label backfill); only store namespaces,
+# and never so that one loses its store label. Dry runs still go through admission.
+out=$(kubectl label namespace "$PLATFORM_NS" probe=1 --dry-run=server --as="$SA" 2>&1 || true)
+[[ "$out" == *"store-* namespaces"* ]] && ok "admission policy blocks labelling the platform namespace" || ko "admission policy blocks labelling the platform namespace" "$out"
+out=$(kubectl label namespace "store-$A" urumi.io/store- --dry-run=server --as="$SA" 2>&1 || true)
+[[ "$out" == *"urumi.io/store=true"* ]] && ok "admission policy keeps the store label on store namespaces" || ko "admission policy keeps the store label" "$out"
 
 echo
 echo "teardown"

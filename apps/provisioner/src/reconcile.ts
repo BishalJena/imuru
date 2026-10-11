@@ -4,6 +4,17 @@ import type { Helm } from "./helm.js";
 import type { Kube } from "./k8s.js";
 
 export const STORE_LABEL = "urumi.io/store";
+/** Chart version a store namespace was last installed or upgraded with. */
+export const REVISION_LABEL = "urumi.io/chart-revision";
+
+// WordPress runs as root in its image, so "restricted" cannot be enforced yet.
+// Baseline blocks privileged and host-level pods; restricted is reported as warnings.
+const STORE_NAMESPACE_LABELS: Record<string, string> = {
+  "app.kubernetes.io/part-of": "urumi",
+  "pod-security.kubernetes.io/enforce": "baseline",
+  "pod-security.kubernetes.io/enforce-version": "latest",
+  "pod-security.kubernetes.io/warn": "restricted",
+};
 const namespaceOf = (slug: string) => `store-${slug}`;
 
 /**
@@ -17,6 +28,7 @@ const namespaceOf = (slug: string) => `store-${slug}`;
  */
 export class Reconciler {
   private readonly inFlight = new Map<string, Promise<void>>();
+  private labelsBackfilled = false;
 
   constructor(
     private readonly cfg: Config,
@@ -26,8 +38,46 @@ export class Reconciler {
     private readonly log: (msg: string) => void = (m) => console.log(m),
   ) {}
 
+  /**
+   * Brings store namespaces created by an older provisioner up to date: missing
+   * labels are added, and releases installed from an older chart are upgraded.
+   * Returns false when any namespace failed, so the next tick retries it.
+   */
+  private async backfillStores(): Promise<boolean> {
+    let complete = true;
+    for (const ns of await this.kube.storeNamespaces()) {
+      if (ns.phase === "Terminating") continue;
+      const missing = Object.fromEntries(
+        Object.entries(STORE_NAMESPACE_LABELS).filter(([k]) => ns.labels[k] === undefined),
+      );
+      if (Object.keys(missing).length) await this.kube.labelNamespace(ns.name, missing);
+      if (ns.labels[REVISION_LABEL] === this.cfg.STORE_CHART_REVISION) continue;
+      const slug = ns.name.replace(/^store-/, "");
+      try {
+        await this.recoverInterrupted(ns.name);
+        await this.helm.upgradeInstall(
+          ns.name,
+          this.cfg.CHART_PATH,
+          ns.name,
+          this.storeSets(slug),
+          this.cfg.HELM_TIMEOUT,
+        );
+        await this.kube.labelNamespace(ns.name, {
+          [REVISION_LABEL]: this.cfg.STORE_CHART_REVISION,
+        });
+        this.log(`upgraded ${slug} to chart ${this.cfg.STORE_CHART_REVISION}`);
+      } catch (err) {
+        complete = false;
+        this.log(`upgrade ${slug} will retry: ${(err as Error).message}`);
+      }
+    }
+    return complete;
+  }
+
   /** Starts work for pending stores without waiting for it to finish. */
   async tick(): Promise<void> {
+    // Retried on the next tick if it fails: the flag is set only after success.
+    if (!this.labelsBackfilled) this.labelsBackfilled = await this.backfillStores();
     const work = await this.gateway.pending();
     for (const lane of ["present", "absent"] as const) {
       const busy = [...this.inFlight.keys()].filter((id) => this.lanes.get(id) === lane).length;
@@ -56,6 +106,23 @@ export class Reconciler {
     this.inFlight.set(store.id, run);
   }
 
+  /** Helm values that every store release is installed or upgraded with. */
+  private storeSets(slug: string): Record<string, string | boolean> {
+    const sets: Record<string, string | boolean> = {
+      "global.domain": this.cfg.DOMAIN,
+      "global.tls.enabled": this.cfg.TLS_ENABLED === "true",
+      "store.hostOverride": this.storeHost(slug),
+      "store.title": `Store ${slug}`,
+      "wooMcp.image.repository": this.cfg.WOO_MCP_IMAGE_REPOSITORY,
+      "wooMcp.image.tag": this.cfg.WOO_MCP_IMAGE_TAG,
+      "guardrails.enabled": true,
+      "networkPolicy.gateway.namespace": this.cfg.GATEWAY_NAMESPACE,
+    };
+    if (this.cfg.CLUSTER_ISSUER) sets["global.tls.clusterIssuer"] = this.cfg.CLUSTER_ISSUER;
+    if (this.cfg.STORAGE_CLASS) sets["global.storageClass"] = this.cfg.STORAGE_CLASS;
+    return sets;
+  }
+
   storeHost(slug: string): string {
     return `${slug}${this.cfg.HOST_SUFFIX}.${this.cfg.DOMAIN}`;
   }
@@ -66,28 +133,20 @@ export class Reconciler {
     const scheme = this.cfg.TLS_ENABLED === "true" ? "https" : "http";
     try {
       this.log(`provisioning ${store.slug}`);
-      await this.kube.createNamespace(ns, {
-        [STORE_LABEL]: "true",
-        "app.kubernetes.io/part-of": "urumi",
-      });
+      await this.kube.createNamespace(ns, { [STORE_LABEL]: "true", ...STORE_NAMESPACE_LABELS });
       await this.kube.ensureRoleBinding(ns, "provisioner", this.cfg.STORE_CLUSTER_ROLE, {
         name: this.cfg.SERVICE_ACCOUNT,
         namespace: this.cfg.POD_NAMESPACE,
       });
-      const sets: Record<string, string | boolean> = {
-        "global.domain": this.cfg.DOMAIN,
-        "global.tls.enabled": this.cfg.TLS_ENABLED === "true",
-        "store.hostOverride": host,
-        "store.title": `Store ${store.slug}`,
-        "wooMcp.image.repository": this.cfg.WOO_MCP_IMAGE_REPOSITORY,
-        "wooMcp.image.tag": this.cfg.WOO_MCP_IMAGE_TAG,
-        "guardrails.enabled": true,
-        "networkPolicy.gateway.namespace": this.cfg.GATEWAY_NAMESPACE,
-      };
-      if (this.cfg.CLUSTER_ISSUER) sets["global.tls.clusterIssuer"] = this.cfg.CLUSTER_ISSUER;
-      if (this.cfg.STORAGE_CLASS) sets["global.storageClass"] = this.cfg.STORAGE_CLASS;
       await this.recoverInterrupted(ns);
-      await this.helm.upgradeInstall(ns, this.cfg.CHART_PATH, ns, sets, this.cfg.HELM_TIMEOUT);
+      await this.helm.upgradeInstall(
+        ns,
+        this.cfg.CHART_PATH,
+        ns,
+        this.storeSets(store.slug),
+        this.cfg.HELM_TIMEOUT,
+      );
+      await this.kube.labelNamespace(ns, { [REVISION_LABEL]: this.cfg.STORE_CHART_REVISION });
 
       const secret = await this.kube.readSecret(ns, "woo-mcp");
       const token = secret?.["bearer-token"];
