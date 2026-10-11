@@ -17,8 +17,8 @@ flowchart LR
   G --> P[(Postgres)]
   G -->|MCP + bearer| WM[woo-mcp]
   G -->|MCP| E[everything]
-  G -->|MCP + token| GH[GitHub remote MCP]
-  G -->|function calling| L[Gemini]
+  G -->|MCP + token| GH[GitHub remote MCP, optional]
+  G -->|function calling| L[LLM: Gemini or OpenAI-compatible]
   WM -->|REST API, OAuth 1.0a| W --> M[(MariaDB)]
 ```
 
@@ -32,7 +32,7 @@ flowchart LR
 | `demo-upstreams` | `everything`        | The MCP reference server, registered twice to demonstrate tool-name collisions.                                                                       |
 | `platform`       | `provisioner`       | Creates and deletes additional stores from the dashboard (Helm releases in `store-<name>` namespaces). The only component with Kubernetes API access. |
 
-Design and tradeoffs: [`docs/DESIGN.md`](docs/DESIGN.md). Threat model: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
+Design and tradeoffs: [`docs/DESIGN.md`](docs/DESIGN.md), including [what holds under failure](docs/DESIGN.md#what-holds-under-failure) and the test that proves each guarantee. Threat model: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
 ## Local setup
 
@@ -203,7 +203,7 @@ Stand-out items from the brief:
 | Item                                                                                                                                                                                                                                                                                                                                                           | Where                                                                                                                |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | Tool permissions per role: hidden from the tool list, rejected and audited when called directly                                                                                                                                                                                                                                                                | `apps/gateway/src/policies.ts`, dashboard **Permissions** page                                                       |
-| Security hardening: SSRF guard, default-deny ingress and egress NetworkPolicies everywhere, non-root read-only containers, encrypted upstream credentials, no service-account tokens                                                                                                                                                                           | `apps/gateway/src/ssrf.ts`, `charts/*/templates/networkpolicy.yaml`, `docs/THREAT_MODEL.md`                          |
+| Security hardening: SSRF guard, default-deny ingress and egress NetworkPolicies everywhere, non-root read-only containers for our own images, encrypted upstream credentials, no service-account tokens outside the provisioner, Pod Security `baseline` on store namespaces                                                                                   | `apps/gateway/src/ssrf.ts`, `charts/*/templates/networkpolicy.yaml`, `docs/THREAT_MODEL.md`                          |
 | Upgrades and rollback                                                                                                                                                                                                                                                                                                                                          | `scripts/upgrade-rollback.sh`, section above                                                                         |
 | **Bonus: multi-store provisioning.** Create/delete from the dashboard, a namespace, database, volumes and host per store, automatic MCP registration, NetworkPolicy isolation, ResourceQuota/LimitRange, max stores per user, safe retries and restarts, automatic upgrade on chart changes, least-privilege RBAC plus an admission policy for the provisioner | `apps/provisioner`, `charts/platform/templates/provisioner.yaml`, dashboard **Stores** page, `scripts/e2e-stores.sh` |
 | Observability: Prometheus `/metrics` (tool calls by server, outcome and channel; latency histogram per server; upstream status; open sessions), per-server calls, error rate and p50/p95 latency on the Servers page, and failure reasons in plain words ("Connection refused: nothing is listening at that address")                                          | `apps/gateway/src/metrics.ts`, `GET /api/servers/stats`, `describe()` in `apps/gateway/src/upstream.ts`              |
@@ -225,11 +225,12 @@ apps/
   woo-mcp/          WooCommerce MCP server
   gateway/          API, MCP gateway, chat agent, migrations
   dashboard/        React dashboard
+  provisioner/      reconcile loop that installs and deletes stores
 images/everything/  pinned image for the MCP reference server
 charts/
   store/            WordPress, MariaDB, bootstrap Job, woo-mcp
-  platform/         gateway, dashboard, Postgres
+  platform/         gateway, dashboard, Postgres, provisioner
   demo-upstreams/   in-cluster third-party MCP servers
 docs/               design and threat model
-scripts/            k3d config, e2e checks, upgrade rehearsal, VPS setup
+scripts/            k3d config, chart tests, e2e checks, upgrade rehearsal, VPS setup
 ```
