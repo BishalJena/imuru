@@ -89,6 +89,11 @@ check_cod_order() {
   [[ "$status" == "cod:processing" ]]
 }
 
+# Wait for the workloads the checks use. A deploy that has returned can still
+# be replacing pods (WordPress uses Recreate), and the retries below are short.
+kubectl -n "$STORE_NS" rollout status deploy/wordpress --timeout=180s >/dev/null
+kubectl -n "$PLATFORM_NS" rollout status deploy/gateway --timeout=180s >/dev/null
+
 echo "store ($STORE_URL)"
 retry 15 check_storefront && ok "storefront returns 200" || ko "storefront returns 200"
 retry 5 check_products && ok "shop lists products" || ko "shop lists products"

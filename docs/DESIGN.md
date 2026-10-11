@@ -174,10 +174,12 @@ flowchart LR
   - accepts connections only from the provisioner pod (NetworkPolicy),
   - requires a shared token from a Secret.
 - **Least-privilege RBAC.**
-  - Cluster-wide, the provisioner may only create and delete namespaces and RoleBindings, and `bind` the `urumi-store-manager` ClusterRole.
+  - Cluster-wide, the provisioner may only get, list, create, patch and delete namespaces, create and delete RoleBindings, and `bind` the `urumi-store-manager` ClusterRole.
   - It gets the permissions to manage a store (Secrets, workloads, PVCs, Ingress, NetworkPolicies, quota) only through a RoleBinding it creates inside each `store-<name>` namespace. So it can never read the `platform` Secrets.
-  - A `ValidatingAdmissionPolicy` adds a check RBAC cannot express. The provisioner's namespace and RoleBinding writes must target `store-*` names, carry the `urumi.io/store` label, and bind only the store role. This prevents it from binding itself into `platform` or `kube-system`. `scripts/e2e-stores.sh` verifies each of these limits.
+  - A `ValidatingAdmissionPolicy` adds a check RBAC cannot express. The provisioner's namespace and RoleBinding writes (create, update, delete) must target `store-*` names, keep the `urumi.io/store` label, and bind only the store role. This prevents it from binding itself into `platform` or `kube-system`, or relabelling any other namespace. `scripts/e2e-stores.sh` verifies each of these limits.
 - **Isolation.** Each store runs the same chart with the same NetworkPolicies: woo-mcp reaches only its own WordPress, and MariaDB accepts only its own pods. The gateway's egress allows namespaces labelled `urumi.io/store`.
+- **Pod security.** Store namespaces enforce the Pod Security `baseline` profile and warn on `restricted`. `restricted` is not enforced because the official WordPress image runs Apache as root. No store pod mounts a ServiceAccount token: none of them calls the Kubernetes API.
+- **Upgrading existing stores.** The store chart's `version` is the store revision. The provisioner records it on each store namespace (`urumi.io/chart-revision`) after every install or upgrade. When it starts, it upgrades every store whose recorded revision differs, with the same values as a fresh install, and adds any namespace labels a newer release introduced. A failed upgrade is retried on the next tick. Bump the chart version whenever store templates change.
 - **Guardrails.** Each namespace gets a ResourceQuota (CPU, memory, storage, PVC, pod and service counts) and a LimitRange. Each user has a store limit, enforced in a transaction with a per-user advisory lock, so parallel requests cannot exceed it.
 - **Teardown.** Deregister the upstream first, so its tools vanish from clients before the backend does. Then `helm uninstall`, then delete the namespace, which removes the PVCs, the kept Secrets and the RoleBinding. The row is purged once the namespace is gone.
 
@@ -227,9 +229,14 @@ One production detail: WooCommerce verifies OAuth signatures against its home UR
 
 - **Unit and integration tests** (`make check`):
   - woo-mcp: OAuth signature against a known-good vector, the REST client's error mapping, and protocol-level tests over HTTP.
-  - gateway: runs against a real Postgres and real in-process MCP servers that are slow, dead or have colliding names. Covers auth, roles, revocation inside a session, session binding, audit, encrypted credentials, the SSRF guard, timeouts, `list_changed`, tool permissions, and the chat loop with a scripted model.
+  - gateway: runs against a real Postgres and real in-process MCP servers that are slow, dead or have colliding names. Covers auth, roles, revocation inside a session, session binding, audit, encrypted credentials, the SSRF guard, timeouts, `list_changed`, tool permissions, store lifecycle races, and the chat loop with a scripted model.
+  - provisioner: the reconcile loop against fake Kubernetes, Helm and gateway adapters (parallel lanes, cancellation, interrupted-install recovery, revision upgrades), and each adapter against a fake API server or a fake `helm` binary.
+  - dashboard: page behaviour in jsdom (key creation and revocation, chat history after a failed turn, managed servers, self-protection on the Team page).
+  - charts: render-based assertions with `helm template` (`scripts/chart-tests.sh`): RBAC scope, NetworkPolicy paths, probes, limits, no ServiceAccount tokens on store pods, no plaintext secrets.
 - **End to end** (`make e2e`), against the running cluster:
   - The store checkout with COD.
   - The two-user gateway flow: invite, own key, all servers' tools, orders today, routing, disable/enable, kill-pod and recovery, permissions, revoke, audit attribution.
   - Network isolation and egress checks.
+- **Multi-store end to end** (`make e2e-stores`): parallel provisioning, per-user limits, isolation between stores, RBAC and admission-policy limits on the provisioner, deletion during install, and teardown.
+- **Upgrade and rollback** (`scripts/upgrade-rollback.sh`): a store upgrade and `helm rollback`, checking that settings and product data follow both ways.
 - **From scratch:** `make cluster-down && make cluster-up && make deploy-local && make e2e` reproduces everything with no manual steps.
