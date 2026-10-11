@@ -21,6 +21,14 @@ export interface Gateway {
   removeServer(slug: string): Promise<void>;
 }
 
+/** The gateway refused because the store was deleted while we worked on it. */
+export class StoreCancelledError extends Error {
+  constructor(what: string) {
+    super(`${what}: store deletion requested`);
+    this.name = "StoreCancelledError";
+  }
+}
+
 /** Client for the gateway's internal API. */
 export class GatewayClient implements Gateway {
   constructor(
@@ -35,6 +43,7 @@ export class GatewayClient implements Gateway {
       body: body === undefined ? null : JSON.stringify(body),
       signal: AbortSignal.timeout(15_000),
     });
+    if (res.status === 409) throw new StoreCancelledError(`${method} ${path}`);
     if (!res.ok && res.status !== 404)
       throw new Error(`gateway ${method} ${path}: HTTP ${res.status}`);
     return res;

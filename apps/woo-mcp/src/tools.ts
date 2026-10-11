@@ -258,14 +258,21 @@ export function registerTools(
     async ({ date, after, before, status, page, per_page }) => {
       try {
         const range = date ? dayRange(date) : { after, before };
-        const { data, total } = await woo.get<WooOrder[]>("/orders", {
-          after: range.after,
-          before: range.before,
-          status,
-          page,
-          per_page,
-        });
-        const { timezone } = await store();
+        // Store info only labels the range: fetched in parallel, and its
+        // failure must not fail an order listing that succeeded.
+        const [{ data, total }, timezone] = await Promise.all([
+          woo.get<WooOrder[]>("/orders", {
+            after: range.after,
+            before: range.before,
+            status,
+            page,
+            per_page,
+          }),
+          store().then(
+            (s) => s.timezone,
+            () => "unknown",
+          ),
+        ]);
         return ok({
           items: data.map(toSummary),
           page,

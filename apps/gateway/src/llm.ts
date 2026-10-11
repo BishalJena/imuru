@@ -44,19 +44,49 @@ export interface LlmProvider {
  * matters for validation tooling.
  */
 export function toGeminiSchema(schema: Record<string, unknown>): Record<string, unknown> {
-  const DROP = new Set(["$schema", "$id", "$comment", "$defs", "definitions"]);
-  const walk = (v: unknown): unknown => {
-    if (Array.isArray(v)) return v.map(walk);
-    if (v && typeof v === "object") {
-      return Object.fromEntries(
-        Object.entries(v as Record<string, unknown>)
-          .filter(([k]) => !DROP.has(k))
-          .map(([k, val]) => [k, walk(val)]),
-      );
-    }
-    return v;
+  const defs = {
+    ...((schema.definitions as Record<string, unknown> | undefined) ?? {}),
+    ...((schema.$defs as Record<string, unknown> | undefined) ?? {}),
   };
-  const out = walk(schema) as Record<string, unknown>;
+  // Keywords dropped at schema positions only; under "properties" keys are
+  // parameter names and are kept whatever they are called.
+  const DROP = new Set(["$schema", "$id", "$comment", "$defs", "definitions"]);
+  const MAX_DEPTH = 8;
+
+  const resolve = (ref: string): unknown => {
+    const m = /^#\/(?:\$defs|definitions)\/(.+)$/.exec(ref);
+    return m ? defs[decodeURIComponent(m[1]!)] : undefined;
+  };
+
+  const schemaNode = (v: unknown, seen: string[]): unknown => {
+    if (Array.isArray(v)) return v.map((x) => schemaNode(x, seen));
+    if (!v || typeof v !== "object") return v;
+    const node = v as Record<string, unknown>;
+    if (typeof node.$ref === "string") {
+      const target = resolve(node.$ref);
+      // Unknown or recursive references become an unconstrained object.
+      if (!target || seen.includes(node.$ref) || seen.length >= MAX_DEPTH)
+        return { type: "object" };
+      return schemaNode(target, [...seen, node.$ref]);
+    }
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(node)) {
+      if (DROP.has(k)) continue;
+      if ((k === "properties" || k === "patternProperties") && val && typeof val === "object") {
+        out[k] = Object.fromEntries(
+          Object.entries(val as Record<string, unknown>).map(([name, sub]) => [
+            name,
+            schemaNode(sub, seen),
+          ]),
+        );
+      } else {
+        out[k] = schemaNode(val, seen);
+      }
+    }
+    return out;
+  };
+
+  const out = schemaNode(schema, []) as Record<string, unknown>;
   if (out.type !== "object") return { type: "object", properties: {} };
   return out;
 }

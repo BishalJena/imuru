@@ -184,22 +184,28 @@ export class ServerService {
     return true;
   }
 
-  /** Register or update a managed server by slug (provisioned stores). */
+  /**
+   * Register or update a provisioned store's server by slug. Only rows the
+   * provisioner owns (managed) are overwritten; returns null on a conflict
+   * with an admin-created server.
+   */
   async upsertManaged(input: {
     slug: string;
     name: string;
     url: string;
     credential: string;
-  }): Promise<ServerRow> {
+  }): Promise<ServerRow | null> {
     const r = await this.db.query<ServerRow>(
       `INSERT INTO servers (slug, name, url, auth_type, credential_enc, managed)
        VALUES ($1, $2, $3, 'bearer', $4, true)
        ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name, url = EXCLUDED.url, auth_type = 'bearer',
-         credential_enc = EXCLUDED.credential_enc, managed = true, updated_at = now()
+         credential_enc = EXCLUDED.credential_enc, updated_at = now()
+       WHERE servers.managed
        RETURNING *`,
       [input.slug, input.name, input.url, this.sealer.seal(input.credential)],
     );
-    const row = r.rows[0]!;
+    const row = r.rows[0];
+    if (!row) return null;
     const live = this.registry.get(row.slug);
     if (
       !live ||
@@ -212,11 +218,12 @@ export class ServerService {
     return row;
   }
 
-  /** Remove a provisioned store's server; no tombstone, a re-created store registers again. */
+  /** Remove a provisioned store's server; admin-created servers are never touched. */
   async removeBySlug(slug: string): Promise<boolean> {
-    const r = await this.db.query("DELETE FROM servers WHERE slug = $1", [slug]);
+    const r = await this.db.query("DELETE FROM servers WHERE slug = $1 AND managed", [slug]);
+    if (!r.rowCount) return false;
     await this.registry.remove(slug);
-    return (r.rowCount ?? 0) > 0;
+    return true;
   }
 
   /** API view: status from the live registry; never the URL's credential. */

@@ -1,5 +1,5 @@
 import type { Config } from "./config.js";
-import type { Gateway, StoreWork } from "./gateway.js";
+import { StoreCancelledError, type Gateway, type StoreWork } from "./gateway.js";
 import type { Helm } from "./helm.js";
 import type { Kube } from "./k8s.js";
 
@@ -8,11 +8,15 @@ const namespaceOf = (slug: string) => `store-${slug}`;
 
 /**
  * Drives every store toward its desired state. Every step is idempotent, so a
- * store interrupted by a restart is simply picked up again on the next tick:
- * it either completes or fails with the reason helm or the API reported.
+ * store interrupted by a restart is picked up again on the next tick: it
+ * either completes or fails with the reason helm or the API reported.
+ *
+ * Installs and deletions run in separate lanes of CONCURRENCY slots each, and
+ * a tick only starts work: a slow install never delays other stores, and
+ * deletions waiting for a namespace to terminate never starve new stores.
  */
 export class Reconciler {
-  private readonly inFlight = new Set<string>();
+  private readonly inFlight = new Map<string, Promise<void>>();
 
   constructor(
     private readonly cfg: Config,
@@ -22,22 +26,34 @@ export class Reconciler {
     private readonly log: (msg: string) => void = (m) => console.log(m),
   ) {}
 
+  /** Starts work for pending stores without waiting for it to finish. */
   async tick(): Promise<void> {
     const work = await this.gateway.pending();
-    const runnable = work
-      .filter((w) => !this.inFlight.has(w.id))
-      .slice(0, this.cfg.CONCURRENCY - this.inFlight.size);
-    await Promise.all(runnable.map((w) => this.run(w)));
+    for (const lane of ["present", "absent"] as const) {
+      const busy = [...this.inFlight.keys()].filter((id) => this.lanes.get(id) === lane).length;
+      work
+        .filter((w) => w.desired === lane && !this.inFlight.has(w.id))
+        .slice(0, Math.max(0, this.cfg.CONCURRENCY - busy))
+        .forEach((w) => this.start(w));
+    }
   }
 
-  private async run(store: StoreWork): Promise<void> {
-    this.inFlight.add(store.id);
-    try {
-      if (store.desired === "absent") await this.teardown(store);
-      else await this.provision(store);
-    } finally {
-      this.inFlight.delete(store.id);
-    }
+  /** Resolves once everything started so far has finished (tests, shutdown). */
+  async idle(): Promise<void> {
+    while (this.inFlight.size) await Promise.allSettled([...this.inFlight.values()]);
+  }
+
+  private readonly lanes = new Map<string, "present" | "absent">();
+
+  private start(store: StoreWork): void {
+    this.lanes.set(store.id, store.desired);
+    const run = (store.desired === "absent" ? this.teardown(store) : this.provision(store)).finally(
+      () => {
+        this.inFlight.delete(store.id);
+        this.lanes.delete(store.id);
+      },
+    );
+    this.inFlight.set(store.id, run);
   }
 
   storeHost(slug: string): string {
@@ -84,6 +100,11 @@ export class Reconciler {
       await this.gateway.report(store.id, "ready", { url: `${scheme}://${host}`, reason: null });
       this.log(`ready ${store.slug}`);
     } catch (err) {
+      if (err instanceof StoreCancelledError) {
+        // Deleted while installing: the teardown lane cleans up on a later tick.
+        this.log(`cancelled ${store.slug}: deletion requested during provisioning`);
+        return;
+      }
       const reason = (err as Error).message.slice(0, 1500);
       this.log(`failed ${store.slug}: ${reason}`);
       await this.gateway.report(store.id, "failed", { reason }).catch(() => undefined);
@@ -114,7 +135,10 @@ export class Reconciler {
       this.log(`deleting ${store.slug}`);
       // Deregister first, so the tools disappear before the backend does.
       await this.gateway.removeServer(`store-${store.slug}`);
-      if (await this.kube.namespaceExists(ns)) {
+      const phase = await this.kube.namespacePhase(ns);
+      // Already terminating: only wait; repeating uninstall/delete achieves nothing.
+      if (phase === "Terminating") return;
+      if (phase === "Active") {
         await this.helm
           .uninstall(ns, ns)
           .catch((err: Error) => this.log(`uninstall ${ns}: ${err.message}`));

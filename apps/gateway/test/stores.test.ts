@@ -114,3 +114,57 @@ describe("internal API", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("store lifecycle guards", () => {
+  it("refuses to register or mark ready a store whose deletion was requested (P3)", async () => {
+    const asAdmin = await gw.login(ADMIN.email, ADMIN.password);
+    const created = await (
+      await asAdmin("/api/stores", { method: "POST", body: JSON.stringify({ slug: "racer" }) })
+    ).json();
+    await asAdmin(`/api/stores/${created.id}`, { method: "DELETE" });
+    const reg = await internal("/servers/store-racer", {
+      method: "PUT",
+      body: JSON.stringify({ name: "x", url: upstreamUrl, credential: "t".repeat(32) }),
+    });
+    expect(reg.status).toBe(409);
+    const ready = await internal(`/stores/${created.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "ready", url: "http://x.test" }),
+    });
+    expect(ready.status).toBe(409);
+    expect(gw.registry.get("store-racer")).toBeUndefined();
+  });
+
+  it("refuses to register a server for a store that does not exist", async () => {
+    const res = await internal("/servers/store-ghost", {
+      method: "PUT",
+      body: JSON.stringify({ name: "x", url: upstreamUrl, credential: "t".repeat(32) }),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("reserves store-* slugs for provisioned stores (G3)", async () => {
+    const asAdmin = await gw.login(ADMIN.email, ADMIN.password);
+    const res = await asAdmin("/api/servers", {
+      method: "POST",
+      body: JSON.stringify({
+        slug: "store-mine",
+        name: "X",
+        url: "https://example.com/mcp",
+        auth_type: "none",
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("the provisioner path never deletes a server it does not manage (G3)", async () => {
+    await gw.servers.create({
+      slug: "store-legacy",
+      name: "Admin's",
+      url: upstreamUrl,
+      auth_type: "none",
+    });
+    expect(await gw.servers.removeBySlug("store-legacy")).toBe(false);
+    expect((await gw.servers.list()).some((s) => s.slug === "store-legacy")).toBe(true);
+  });
+});

@@ -34,6 +34,13 @@ export class StoreService {
     return r.rows;
   }
 
+  async bySlug(slug: string): Promise<StoreRow | null> {
+    return (
+      (await this.db.query<StoreRow>("SELECT * FROM stores WHERE slug = $1", [slug])).rows[0] ??
+      null
+    );
+  }
+
   async get(id: string): Promise<StoreRow | null> {
     return (
       (await this.db.query<StoreRow>("SELECT * FROM stores WHERE id = $1", [id])).rows[0] ?? null

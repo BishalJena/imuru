@@ -4,6 +4,7 @@ import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import { McpServer } from "@modelcontextprotocol/server";
 import type { Express, NextFunction, Request, Response } from "express";
 import type { Config } from "./config.js";
+import { zoneOf } from "./dates.js";
 import { registerTools, type StoreInfo } from "./tools.js";
 import { WooClient } from "./woo.js";
 
@@ -26,21 +27,30 @@ export function createApp(
     timeoutMs: config.WOO_TIMEOUT_MS,
   }),
 ): Express {
-  let cached: { info: StoreInfo; at: number } | undefined;
-  const storeInfo = async (): Promise<StoreInfo> => {
-    if (cached && Date.now() - cached.at < STORE_INFO_TTL_MS) return cached.info;
+  // The pending fetch is cached too, so concurrent callers after expiry share
+  // one request instead of each hitting the store.
+  let cached: { info: Promise<StoreInfo>; at: number } | undefined;
+  const fetchStoreInfo = async (): Promise<StoreInfo> => {
     const [site, currency] = await Promise.all([
       woo.siteInfo(),
       woo.get<{ code: string }>("/data/currencies/current"),
     ]);
-    const info = {
+    return {
       name: site.name,
       url: site.home,
-      timezone: site.timezone_string || "UTC",
+      timezone: zoneOf(site.timezone_string, Number(site.gmt_offset) || 0),
       currency: currency.data.code,
     };
-    cached = { info, at: Date.now() };
-    return info;
+  };
+  const storeInfo = (): Promise<StoreInfo> => {
+    if (cached && Date.now() - cached.at < STORE_INFO_TTL_MS) return cached.info;
+    const entry = { info: fetchStoreInfo(), at: Date.now() };
+    // A failed fetch must not be cached for the whole TTL.
+    entry.info.catch(() => {
+      if (cached === entry) cached = undefined;
+    });
+    cached = entry;
+    return entry.info;
   };
 
   // Binds 0.0.0.0 inside the pod; Host validation still rejects names not in the allowlist.
@@ -64,7 +74,8 @@ export function createApp(
 
   const requireBearer = (req: Request, res: Response, next: NextFunction) => {
     const header = req.header("authorization") ?? "";
-    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+    // Auth schemes are case-insensitive (RFC 7235).
+    const token = /^bearer\s+/i.test(header) ? header.replace(/^bearer\s+/i, "") : "";
     if (!token || !tokenMatches(token, config.MCP_BEARER_TOKEN)) {
       res
         .status(401)

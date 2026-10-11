@@ -49,7 +49,8 @@ const unauthorized = (res: Response, message: string) =>
 export function mcpAuth(repo: Repo, signer: TokenSigner) {
   return async (req: Request, res: Response, next: NextFunction) => {
     const header = req.header("authorization") ?? "";
-    const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+    // Auth schemes are case-insensitive (RFC 7235).
+    const token = /^bearer\s+/i.test(header) ? header.replace(/^bearer\s+/i, "").trim() : "";
 
     if (token.startsWith("uct_")) {
       const claims = signer.verify(token);
@@ -155,11 +156,15 @@ export function requireJson(req: Request, res: Response, next: NextFunction) {
 }
 
 /** Fixed-window limiter, in memory (single replica). */
-export function rateLimit(opts: { windowMs: number; max: number; key: (req: Request) => string }) {
+export function rateLimit(opts: {
+  windowMs: number;
+  max: number;
+  key: (req: Request, res: Response) => string;
+}) {
   const hits = new Map<string, { n: number; reset: number }>();
   return (req: Request, res: Response, next: NextFunction) => {
     const now = Date.now();
-    const k = opts.key(req);
+    const k = opts.key(req, res);
     const h = hits.get(k);
     if (!h || h.reset < now) hits.set(k, { n: 1, reset: now + opts.windowMs });
     else if (++h.n > opts.max) {

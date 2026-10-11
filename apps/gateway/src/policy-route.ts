@@ -1,4 +1,5 @@
 import express, { type Router } from "express";
+import { rejectNonUuid } from "./api.js";
 import * as z from "zod/v4";
 import { requireAdmin, requireJson, sessionAuth, userOf } from "./auth.js";
 import type { Policies } from "./policies.js";
@@ -13,6 +14,7 @@ const rule = z.object({
 /** Admin-only CRUD for tool deny rules: /api/policies. */
 export function policyRouter(repo: Repo, policies: Policies): Router {
   const r = express.Router();
+  r.param("id", rejectNonUuid);
   r.use(requireJson, sessionAuth(repo), requireAdmin);
   r.get("/", (_req, res) => {
     res.json(policies.list());

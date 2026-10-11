@@ -37,6 +37,7 @@ createServer((req, res) => {
 
 process.on("SIGTERM", () => {
   stopping = true;
+  // In-flight helm runs are abandoned on purpose: the next pod recovers them.
   // helm may be mid-install; the next pod resumes it (upgrade --install is idempotent).
   setTimeout(() => process.exit(0), 1000);
 });

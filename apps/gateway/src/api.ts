@@ -1,6 +1,6 @@
 import express, { type Request, type Response, type Router } from "express";
 import * as z from "zod/v4";
-import { verifyPassword } from "./crypto.js";
+import { hashPassword, randomToken, verifyPassword } from "./crypto.js";
 import {
   rateLimit,
   readCookie,
@@ -24,6 +24,17 @@ export interface ApiDeps {
 
 const fail = (res: Response, status: number, code: string, message: string) =>
   res.status(status).json({ error: { code, message } });
+
+let dummy: Promise<string> | undefined;
+const dummyHash = () => (dummy ??= hashPassword(randomToken(16)));
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Express param handler: an id that is not a UUID cannot exist. */
+export function rejectNonUuid(_req: Request, res: Response, next: () => void, value: string) {
+  if (UUID.test(value)) next();
+  else res.status(404).json({ error: { code: "not_found", message: "Not found" } });
+}
 
 /** Route parameter as a string (Express types allow string[] for repeated params). */
 const param = (req: Request, name: string): string => String(req.params[name] ?? "");
@@ -68,6 +79,7 @@ const createServer = z
     ...serverBase,
   })
   .refine((s) => s.slug.indexOf("__") === -1, "slug cannot contain __")
+  .refine((s) => !s.slug.startsWith("store-"), "store-* slugs are reserved for provisioned stores")
   .refine(
     (s) => s.auth_type !== "header" || !!s.auth_header_name,
     "auth_header_name is required for header auth",
@@ -77,6 +89,8 @@ const patchServer = z.object(serverBase).partial();
 export function apiRouter(deps: ApiDeps): Router {
   const { repo, servers } = deps;
   const r = express.Router();
+  // Ids are UUIDs; anything else cannot exist and must not reach Postgres as a cast error.
+  for (const name of ["id", "keyId"]) r.param(name, rejectNonUuid);
   const auth = sessionAuth(repo);
 
   r.use(requireJson);
@@ -101,7 +115,9 @@ export function apiRouter(deps: ApiDeps): Router {
       const body = parse(z.object({ email: z.email(), password: z.string() }), req, res);
       if (!body) return;
       const user = await repo.userByEmailWithHash(body.email);
-      const ok = await verifyPassword(body.password, user?.password_hash ?? null);
+      // Unknown emails and invited users still pay for a hash, so response time
+      // does not reveal which accounts exist.
+      const ok = await verifyPassword(body.password, user?.password_hash ?? (await dummyHash()));
       if (!user || !ok || user.status !== "active") {
         fail(res, 401, "invalid_credentials", "Wrong email or password");
         return;
@@ -296,7 +312,18 @@ export function apiRouter(deps: ApiDeps): Router {
       fail(res, 404, "not_found", "No such server");
       return;
     }
-    if (body.url && body.url !== current.url && !current.managed) {
+    // Managed servers are wired by Helm values or the provisioner; their URL is
+    // not editable here (and they connect without the SSRF guard).
+    if (body.url !== undefined && body.url !== current.url && current.managed) {
+      fail(
+        res,
+        409,
+        "managed",
+        "This server is managed by the platform; its URL cannot be changed here",
+      );
+      return;
+    }
+    if (body.url && body.url !== current.url) {
       const blocked = await deps.urlGuard.check(body.url);
       if (blocked) {
         fail(res, 400, "url_blocked", blocked);
@@ -304,7 +331,9 @@ export function apiRouter(deps: ApiDeps): Router {
       }
     }
     const authType = body.auth_type ?? current.auth_type;
-    if (authType === "header" && !(body.auth_header_name ?? current.auth_header_name)) {
+    const headerName =
+      body.auth_header_name !== undefined ? body.auth_header_name : current.auth_header_name;
+    if (authType === "header" && !headerName) {
       fail(res, 400, "invalid", "auth_header_name is required for header auth");
       return;
     }
@@ -324,7 +353,7 @@ export function apiRouter(deps: ApiDeps): Router {
     const q = req.query as Record<string, string | undefined>;
     const userId = me.role === "admin" ? q.user || undefined : me.id;
     const filter: Parameters<Repo["listAudit"]>[0] = {
-      limit: Math.min(Number(q.limit) || 200, 1000),
+      limit: Math.min(Math.max(Math.trunc(Number(q.limit)) || 200, 1), 1000),
     };
     if (userId) filter.userId = userId;
     if (q.server) filter.server = q.server;

@@ -84,10 +84,12 @@ export class Metrics {
       "gauge",
       "1 if the upstream is connected, 0 if unreachable or disabled.",
     );
-    metric("urumi_gateway_upstream_tools", "gauge", "Tools currently exposed by the upstream.");
     for (const u of this.registry.list()) {
       const l = labels({ server: u.config.slug, status: u.status });
       out.push(`urumi_gateway_upstream_up${l} ${u.status === "connected" ? 1 : 0}`);
+    }
+    metric("urumi_gateway_upstream_tools", "gauge", "Tools currently exposed by the upstream.");
+    for (const u of this.registry.list()) {
       out.push(
         `urumi_gateway_upstream_tools${labels({ server: u.config.slug })} ${u.tools.length}`,
       );

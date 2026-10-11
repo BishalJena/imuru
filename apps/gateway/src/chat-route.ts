@@ -29,7 +29,8 @@ export function chatRouter(deps: {
     rateLimit({
       windowMs: 60_000,
       max: 20,
-      key: (req) => `chat:${req.header("cookie") ?? req.ip}`,
+      // Per authenticated user: varying the Cookie header must not reset the budget.
+      key: (_req, res) => `chat:${userOf(res).id}`,
     }),
     async (req, res) => {
       if (!deps.provider) {

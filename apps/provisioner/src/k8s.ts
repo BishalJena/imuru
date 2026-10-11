@@ -3,7 +3,8 @@ import { readFile } from "node:fs/promises";
 const SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount";
 
 export interface Kube {
-  namespaceExists(name: string): Promise<boolean>;
+  /** "Active", "Terminating", or null when the namespace does not exist. */
+  namespacePhase(name: string): Promise<"Active" | "Terminating" | null>;
   createNamespace(name: string, labels: Record<string, string>): Promise<void>;
   deleteNamespace(name: string): Promise<void>;
   ensureRoleBinding(
@@ -44,11 +45,12 @@ export class InClusterKube implements Kube {
     }
   }
 
-  async namespaceExists(name: string): Promise<boolean> {
+  async namespacePhase(name: string): Promise<"Active" | "Terminating" | null> {
     const res = await this.call("GET", `/api/v1/namespaces/${name}`);
-    if (res.status === 404) return false;
+    if (res.status === 404) return null;
     await this.expect(res, [200], `get namespace ${name}`);
-    return true;
+    const phase = ((await res.json()) as { status?: { phase?: string } }).status?.phase;
+    return phase === "Terminating" ? "Terminating" : "Active";
   }
 
   async createNamespace(name: string, labels: Record<string, string>): Promise<void> {

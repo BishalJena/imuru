@@ -12,9 +12,18 @@ export async function listen(app: { listen: (port: number, host: string) => Http
 }
 
 /** A real Streamable HTTP MCP server with an `echo` tool and optional extras. */
-export async function fakeUpstream(opts: { name: string; delayMs?: number; token?: string }) {
+export async function fakeUpstream(opts: {
+  name: string;
+  delayMs?: number;
+  token?: string;
+  /** Delay before answering `initialize` (slow handshake). */
+  initDelayMs?: number;
+}) {
   const app = createMcpExpressApp();
   app.post("/mcp", async (req, res) => {
+    if (opts.initDelayMs && (req.body as { method?: string })?.method === "initialize") {
+      await new Promise((r) => setTimeout(r, opts.initDelayMs));
+    }
     if (opts.token && req.header("authorization") !== `Bearer ${opts.token}`) {
       res.status(401).end();
       return;

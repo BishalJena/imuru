@@ -42,12 +42,17 @@ export class WooClient {
   }
 
   /** Unauthenticated WordPress REST index (site name, URL, timezone). */
-  async siteInfo(): Promise<{ name: string; home: string; timezone_string: string }> {
+  async siteInfo(): Promise<{
+    name: string;
+    home: string;
+    timezone_string: string;
+    gmt_offset: number | string;
+  }> {
     const res = await this.send(
-      new URL("/wp-json/?_fields=name,home,timezone_string", this.opts.baseUrl),
+      new URL("/wp-json/?_fields=name,home,timezone_string,gmt_offset", this.opts.baseUrl),
       { method: "GET" },
     );
-    return (await res.json()) as { name: string; home: string; timezone_string: string };
+    return this.readJson(res);
   }
 
   private async request<T>(
@@ -78,8 +83,25 @@ export class WooClient {
     }
     const res = await this.send(url, init);
     const total = res.headers.get("x-wp-total");
-    const data = (await res.json()) as T;
+    const data = await this.readJson<T>(res);
     return total === null ? { data } : { data, total: Number(total) };
+  }
+
+  /**
+   * The body is read while the request's abort signal is still running, so a
+   * body that stalls past the timeout fails here; both that and a non-JSON
+   * body (a PHP notice before the JSON) become clear errors.
+   */
+  private async readJson<T>(res: Response): Promise<T> {
+    try {
+      return (await res.json()) as T;
+    } catch (err) {
+      const name = (err as { name?: string }).name;
+      if (name === "TimeoutError" || name === "AbortError") {
+        throw new WooError(`Store did not respond within ${this.opts.timeoutMs / 1000}s`);
+      }
+      throw new WooError("Store returned an invalid response");
+    }
   }
 
   private async send(url: URL, init: RequestInit): Promise<Response> {

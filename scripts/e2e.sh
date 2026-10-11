@@ -155,7 +155,9 @@ server_id() { api admin GET /servers | json "[s['id'] for s in d if s['slug'] ==
 
 echo
 echo "gateway ($APP_URL)"
-[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$APP_URL/mcp")" == 401 ]] && ok "/mcp rejects a request without an API key" || ko "/mcp rejects a request without an API key"
+# Retried: right after a gateway rollout the new pod can be briefly unreachable.
+rejects_no_key() { [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$APP_URL/mcp")" == 401 ]]; }
+retry 10 rejects_no_key && ok "/mcp rejects a request without an API key" || ko "/mcp rejects a request without an API key"
 retry 10 login admin "$ADMIN_EMAIL" "$ADMIN_PASSWORD" && ok "admin logs in to the dashboard API" || ko "admin logs in to the dashboard API"
 retry 3 ensure_member && ok "user B (member) accepted an invite and logged in" || ko "user B (member) accepted an invite and logged in"
 KEY=$(api member POST /keys '{"name":"e2e"}' | json 'd["key"]' 2>/dev/null || true)

@@ -104,3 +104,35 @@ describe("toGeminiSchema", () => {
     ).toEqual({ type: "object", properties: { a: { type: "string" } }, required: ["a"] });
   });
 });
+
+describe("toGeminiSchema edge cases (G7)", () => {
+  it("inlines local $refs instead of leaving them dangling", () => {
+    const out = toGeminiSchema({
+      type: "object",
+      properties: { address: { $ref: "#/$defs/Address" } },
+      $defs: { Address: { type: "object", properties: { city: { type: "string" } } } },
+    });
+    expect(out).toEqual({
+      type: "object",
+      properties: { address: { type: "object", properties: { city: { type: "string" } } } },
+    });
+  });
+
+  it("keeps properties whose names look like schema keywords", () => {
+    const out = toGeminiSchema({
+      type: "object",
+      properties: { definitions: { type: "string" }, $id: { type: "string" } },
+      required: ["definitions"],
+    });
+    expect(Object.keys(out.properties as object)).toEqual(["definitions", "$id"]);
+  });
+
+  it("survives recursive references", () => {
+    const out = toGeminiSchema({
+      type: "object",
+      properties: { node: { $ref: "#/$defs/Node" } },
+      $defs: { Node: { type: "object", properties: { next: { $ref: "#/$defs/Node" } } } },
+    });
+    expect(JSON.stringify(out)).not.toContain("$ref");
+  });
+});

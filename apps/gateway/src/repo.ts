@@ -104,6 +104,17 @@ export class Repo {
     const existing = await this.db.query("SELECT id, status FROM users WHERE email = $1", [email]);
     if (existing.rows[0] && existing.rows[0].status !== "invited")
       return { error: "exists" as const };
+    if (existing.rows[0]) {
+      // Re-invite: the latest invite decides role and name, and earlier links stop working.
+      await this.db.query("UPDATE users SET name = $2, role = $3 WHERE id = $1", [
+        existing.rows[0].id,
+        input.name,
+        input.role,
+      ]);
+      await this.db.query("DELETE FROM invites WHERE user_id = $1 AND accepted_at IS NULL", [
+        existing.rows[0].id,
+      ]);
+    }
     const userId: string =
       existing.rows[0]?.id ??
       (

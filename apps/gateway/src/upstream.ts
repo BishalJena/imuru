@@ -28,6 +28,13 @@ export class Upstream extends EventEmitter<{ changed: [] }> {
   tools: Tool[] = [];
   private client: Client | undefined;
   private connecting: Promise<void> | undefined;
+  /**
+   * Bumped whenever the connection is torn down (disable, close, failure).
+   * A connect that started under an older epoch is stale: when it finishes it
+   * closes its own client instead of installing it.
+   */
+  private epoch = 0;
+  private closed = false;
 
   constructor(readonly config: UpstreamConfig) {
     super();
@@ -48,7 +55,7 @@ export class Upstream extends EventEmitter<{ changed: [] }> {
 
   /** Health check: connect if needed, then ping. Safe to call concurrently. */
   async check(): Promise<void> {
-    if (!this.config.enabled) return;
+    if (!this.config.enabled || this.closed) return;
     try {
       if (!this.client) {
         this.connecting ??= this.connect().finally(() => (this.connecting = undefined));
@@ -78,14 +85,24 @@ export class Upstream extends EventEmitter<{ changed: [] }> {
           `${this.config.name} did not respond within ${this.config.timeoutMs / 1000}s`,
         );
       }
-      // A failed call is a strong hint the upstream went away; re-check now
-      // instead of waiting for the next health tick.
+      // The upstream answered, with an error of its own (bad arguments, unknown
+      // tool, invalid result): that is a tool failure, not an outage.
+      const upstreamError = upstreamErrorMessage(err);
+      if (upstreamError) {
+        return {
+          content: [{ type: "text", text: `${this.config.name}: ${upstreamError}` }],
+          isError: true,
+        };
+      }
+      // A transport failure is a strong hint the upstream went away; re-check
+      // now instead of waiting for the next health tick.
       void this.check();
       throw new UpstreamError("unreachable", `${this.config.name} is unreachable`);
     }
   }
 
   async close(): Promise<void> {
+    this.closed = true;
     await this.disconnect();
   }
 
@@ -95,10 +112,11 @@ export class Upstream extends EventEmitter<{ changed: [] }> {
     if (auth?.type === "bearer") headers.Authorization = `Bearer ${auth.token}`;
     if (auth?.type === "header") headers[auth.header] = auth.value;
 
+    const epoch = this.epoch;
     const client = new Client({ name: "urumi-gateway", version: "0.1.0" });
     client.setNotificationHandler("notifications/tools/list_changed", async () => {
       await this.refreshTools(client).catch((err: unknown) => {
-        this.lastError = describe(err);
+        if (client === this.client) this.lastError = describe(err);
       });
     });
     // Redirects are refused outright: an upstream must not be able to bounce
@@ -107,12 +125,23 @@ export class Upstream extends EventEmitter<{ changed: [] }> {
       requestInit: { headers, redirect: "error" },
       ...(this.config.fetch ? { fetch: this.config.fetch } : {}),
     });
-    await withTimeout(client.connect(transport), this.config.connectTimeoutMs, "connect");
+    try {
+      await withTimeout(client.connect(transport), this.config.connectTimeoutMs, "connect");
+    } catch (err) {
+      // The handshake may still complete in the background; never leak it.
+      void client.close().catch(() => undefined);
+      throw err;
+    }
+    if (epoch !== this.epoch || !this.config.enabled || this.closed) {
+      await client.close().catch(() => undefined);
+      return;
+    }
     this.client = client;
     await this.refreshTools(client);
   }
 
   private async refreshTools(client: Client): Promise<void> {
+    if (client !== this.client) return;
     const tools: Tool[] = [];
     let cursor: string | undefined;
     do {
@@ -122,10 +151,13 @@ export class Upstream extends EventEmitter<{ changed: [] }> {
       tools.push(...page.tools);
       cursor = page.nextCursor;
     } while (cursor);
+    // The connection may have been torn down while listing.
+    if (client !== this.client) return;
     this.update("connected", null, tools);
   }
 
   private async disconnect(): Promise<void> {
+    this.epoch++;
     const client = this.client;
     this.client = undefined;
     await client?.close().catch(() => undefined);
@@ -151,9 +183,23 @@ export class UpstreamError extends Error {
   }
 }
 
+/** The SDK's own request timeout (not an upstream error that mentions "timed out"). */
 function isTimeout(err: unknown): boolean {
+  const code = (err as { code?: unknown })?.code;
+  return code === "REQUEST_TIMEOUT" || code === -32001;
+}
+
+/**
+ * The message of an error the upstream itself returned: a JSON-RPC error
+ * (numeric code) or a result that failed the client's schema validation.
+ * Null for transport failures.
+ */
+function upstreamErrorMessage(err: unknown): string | null {
   const e = err as { code?: unknown; message?: unknown };
-  return e?.code === -32001 || /timed? ?out/i.test(String(e?.message ?? ""));
+  if (typeof e?.code === "number" || e?.code === "INVALID_RESULT") {
+    return String(e.message ?? "error").slice(0, 500);
+  }
+  return null;
 }
 
 /**

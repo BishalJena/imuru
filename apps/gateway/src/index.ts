@@ -98,11 +98,17 @@ const server = app.listen(config.PORT, "0.0.0.0", () => {
   console.log(`gateway listening on :${config.PORT}`);
 });
 
+// Stop accepting connections, give in-flight requests a moment, then cut the
+// long-lived ones (MCP GET streams, chat SSE): server.close() alone would wait
+// for them until Kubernetes kills the pod. Clients reconnect to the new pod.
+const SHUTDOWN_GRACE_MS = 5000;
 process.on("SIGTERM", () => {
-  server.close(() => {
+  const finish = () =>
     void registry
       .stop()
       .then(() => db.end())
       .finally(() => process.exit(0));
-  });
+  server.close(finish);
+  server.closeIdleConnections();
+  setTimeout(() => server.closeAllConnections(), SHUTDOWN_GRACE_MS).unref();
 });
