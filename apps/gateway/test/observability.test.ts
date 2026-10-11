@@ -32,9 +32,6 @@ beforeAll(async () => {
   await client.callTool({ name: "alpha__echo", arguments: { text: "b" } });
   await client.callTool({ name: "nope__echo", arguments: {} });
   await client.close();
-  // Audit rows are written asynchronously.
-  await until(() => true);
-  await new Promise((r) => setTimeout(r, 200));
 });
 
 afterAll(async () => {

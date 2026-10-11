@@ -171,7 +171,6 @@ describe("gateway /mcp", () => {
     const client = await connectClient();
     await client.callTool({ name: "alpha__echo", arguments: { text: "audit" } });
     await client.close();
-    await until(() => true);
     const rows = await gw.repo.listAudit({ server: "alpha", limit: 5 });
     expect(rows[0]).toMatchObject({
       user_email: "admin@test.dev",
@@ -181,5 +180,24 @@ describe("gateway /mcp", () => {
       outcome: "ok",
     });
     expect(typeof rows[0].duration_ms).toBe("number");
+  });
+
+  it("records the call in the audit log before the client receives the result", async () => {
+    const audit = gw.repo.audit.bind(gw.repo);
+    gw.repo.audit = async (entry) => {
+      await new Promise((r) => setTimeout(r, 300));
+      return audit(entry);
+    };
+    try {
+      const client = await connectClient();
+      const count = async () => (await gw.repo.listAudit({ server: "alpha", limit: 1000 })).length;
+      const before = await count();
+      await client.callTool({ name: "alpha__echo", arguments: { text: "ordered" } });
+      // No waiting: the row must already exist when the result arrives.
+      expect(await count()).toBe(before + 1);
+      await client.close();
+    } finally {
+      gw.repo.audit = audit;
+    }
   });
 });
