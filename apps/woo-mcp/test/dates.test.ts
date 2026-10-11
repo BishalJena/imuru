@@ -16,7 +16,7 @@ describe("store-local dates", () => {
   });
 
   // WordPress date_query treats after/before as exclusive, so the bounds sit
-  // just outside the day: orders at 00:00:00 and 23:59:59 are included (W2).
+  // one second outside the day: orders at 00:00:00 and 23:59:59 are included.
   it("covers a whole local day, including its first and last second", () => {
     expect(dayRange("2026-10-11")).toEqual({
       after: "2026-10-10T23:59:59",
@@ -26,7 +26,7 @@ describe("store-local dates", () => {
     expect(dayRange("2026-01-01").after).toBe("2025-12-31T23:59:59");
   });
 
-  // WordPress stores a manual offset ("UTC+5:30") as timezone_string="" plus gmt_offset (W1).
+  // WordPress stores a manual offset ("UTC+5:30") as timezone_string="" plus gmt_offset.
   it("supports stores configured with a manual UTC offset", () => {
     expect(zoneOf("", 5.5)).toBe("UTC+05:30");
     expect(zoneOf("", -4)).toBe("UTC-04:00");

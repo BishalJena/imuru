@@ -105,7 +105,7 @@ describe("toGeminiSchema", () => {
   });
 });
 
-describe("toGeminiSchema edge cases (G7)", () => {
+describe("toGeminiSchema edge cases", () => {
   it("inlines local $refs instead of leaving them dangling", () => {
     const out = toGeminiSchema({
       type: "object",

@@ -75,12 +75,12 @@ describe("WooClient", () => {
     expect((err as Error).message).toBe("Store is unreachable");
   });
 
-  it("maps a non-JSON success body to a clear error (W5)", async () => {
+  it("maps a non-JSON success body to a clear error", async () => {
     const woo = client(async () => new Response("<br>PHP Notice: something", { status: 200 }));
     await expect(woo.get("/orders")).rejects.toThrow("Store returned an invalid response");
   });
 
-  it("maps a body that stalls past the timeout to the timeout error (W5)", async () => {
+  it("maps a body that stalls past the timeout to the timeout error", async () => {
     const woo = client(
       async (_url, init) =>
         new Response(

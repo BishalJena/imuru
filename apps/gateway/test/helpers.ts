@@ -46,9 +46,10 @@ export async function fakeUpstream(opts: {
   return { server, url: `${url}/mcp` };
 }
 
-export async function until(cond: () => boolean, ms = 3000) {
+/** Polls until `cond` holds; `refresh` (optional) runs before each check. */
+export async function until(cond: () => boolean, ms = 3000, refresh?: () => Promise<void>) {
   const end = Date.now() + ms;
-  while (!cond()) {
+  while ((await refresh?.(), !cond())) {
     if (Date.now() > end) throw new Error("condition not met in time");
     await new Promise((r) => setTimeout(r, 20));
   }

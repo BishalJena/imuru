@@ -55,7 +55,7 @@ const sessions = async () =>
   );
 
 describe("chat run lifecycle", () => {
-  it("aborts the model and tool calls when the browser disconnects (R9), and leaves no MCP session behind (R2)", async () => {
+  it("aborts the model and tool calls when the browser disconnects, and leaves no MCP session behind", async () => {
     const ctrl = new AbortController();
     const req = asAdmin("/api/chat", {
       method: "POST",
@@ -76,7 +76,7 @@ describe("chat run lifecycle", () => {
 });
 
 describe("stores", () => {
-  it("two users racing for the same slug: one 202, one 409, never 500 (R3)", async () => {
+  it("two users racing for the same slug: one 202, one 409, never 500", async () => {
     const inv = await gw.repo.createInvite({
       email: "racer@test.dev",
       name: "R",
@@ -99,7 +99,7 @@ describe("stores", () => {
   });
 });
 
-describe("metrics cardinality (R4)", () => {
+describe("metrics cardinality", () => {
   it("does not create a series per made-up server name", async () => {
     const adminId = (await gw.repo.userByEmailWithHash(ADMIN.email))!.id;
     const { key } = await gw.repo.createApiKey(adminId, "card", adminId);
@@ -118,7 +118,7 @@ describe("metrics cardinality (R4)", () => {
   });
 });
 
-describe("tool list changes (R5)", () => {
+describe("tool list changes", () => {
   it("emits a change when a tool's schema changes, not only its name", () => {
     const u = new Upstream({
       slug: "u",
@@ -145,7 +145,7 @@ describe("tool list changes (R5)", () => {
   });
 });
 
-describe("cookies (R6)", () => {
+describe("cookies", () => {
   it("a malformed session cookie is treated as no session, not a server error", async () => {
     const res = await fetch(`${gw.url}/api/me`, { headers: { cookie: "urumi_session=%E0" } });
     expect(res.status).toBe(401);
@@ -158,7 +158,7 @@ describe("cookies (R6)", () => {
   });
 });
 
-describe("audit filters (R7)", () => {
+describe("audit filters", () => {
   it.each([["user=alice"], ["since=not-a-date"]])("rejects %s with 400", async (q) => {
     expect((await asAdmin(`/api/audit?${q}`)).status).toBe(400);
   });
@@ -170,7 +170,7 @@ describe("audit filters (R7)", () => {
   });
 });
 
-describe("SSRF guard (R8)", () => {
+describe("SSRF guard", () => {
   const guard = new UrlGuard([], async () => ["93.184.216.34"]);
   it.each([
     "http://metadata.google.internal./computeMetadata/v1",

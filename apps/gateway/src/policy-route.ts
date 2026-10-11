@@ -4,6 +4,7 @@ import * as z from "zod/v4";
 import { requireAdmin, requireJson, sessionAuth, userOf } from "./auth.js";
 import type { Policies } from "./policies.js";
 import type { Repo } from "./repo.js";
+import { parseBody } from "./validate.js";
 
 const rule = z.object({
   role: z.enum(["admin", "member"]),
@@ -20,14 +21,9 @@ export function policyRouter(repo: Repo, policies: Policies): Router {
     res.json(policies.list());
   });
   r.post("/", async (req, res) => {
-    const parsed = rule.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      res.status(400).json({
-        error: { code: "invalid", message: parsed.error.issues.map((i) => i.message).join("; ") },
-      });
-      return;
-    }
-    res.status(201).json(await policies.add({ ...parsed.data, createdBy: userOf(res).id }));
+    const body = parseBody(rule, req, res);
+    if (!body) return;
+    res.status(201).json(await policies.add({ ...body, createdBy: userOf(res).id }));
   });
   r.delete("/:id", async (req, res) => {
     if (await policies.remove(String(req.params.id))) res.status(204).end();

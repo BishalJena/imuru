@@ -13,6 +13,7 @@ import {
 import type { Repo } from "./repo.js";
 import { SLUG_PATTERN, type ServerService } from "./servers.js";
 import type { UrlGuard } from "./ssrf.js";
+import { fail, parseBody } from "./validate.js";
 
 export interface ApiDeps {
   repo: Repo;
@@ -20,10 +21,9 @@ export interface ApiDeps {
   urlGuard: UrlGuard;
   publicUrl: string;
   secureCookies: boolean;
+  /** Called after a user's role or status changes, so open MCP sessions re-list tools. */
+  onUsersChanged?: () => void;
 }
-
-const fail = (res: Response, status: number, code: string, message: string) =>
-  res.status(status).json({ error: { code, message } });
 
 let dummy: Promise<string> | undefined;
 const dummyHash = () => (dummy ??= hashPassword(randomToken(16)));
@@ -38,24 +38,6 @@ export function rejectNonUuid(_req: Request, res: Response, next: () => void, va
 
 /** Route parameter as a string (Express types allow string[] for repeated params). */
 const param = (req: Request, name: string): string => String(req.params[name] ?? "");
-
-function parse<T extends z.ZodType>(
-  schema: T,
-  req: Request,
-  res: Response,
-): z.infer<T> | undefined {
-  const r = schema.safeParse(req.body ?? {});
-  if (!r.success) {
-    fail(
-      res,
-      400,
-      "invalid",
-      r.error.issues.map((i) => `${i.path.join(".") || "body"}: ${i.message}`).join("; "),
-    );
-    return undefined;
-  }
-  return r.data;
-}
 
 const role = z.enum(["admin", "member"]);
 const password = z.string().min(10, "at least 10 characters").max(200);
@@ -112,7 +94,7 @@ export function apiRouter(deps: ApiDeps): Router {
     "/auth/login",
     rateLimit({ windowMs: 15 * 60 * 1000, max: 20, key: (req) => `login:${req.ip}` }),
     async (req, res) => {
-      const body = parse(z.object({ email: z.email(), password: z.string() }), req, res);
+      const body = parseBody(z.object({ email: z.email(), password: z.string() }), req, res);
       if (!body) return;
       const user = await repo.userByEmailWithHash(body.email);
       // Unknown emails and invited users still pay for a hash, so response time
@@ -146,7 +128,7 @@ export function apiRouter(deps: ApiDeps): Router {
   // Invites ---------------------------------------------------------------
 
   r.post("/invites", auth, requireAdmin, async (req, res) => {
-    const body = parse(
+    const body = parseBody(
       z.object({ email: z.email(), name: z.string().trim().min(1).max(80), role }),
       req,
       res,
@@ -175,7 +157,7 @@ export function apiRouter(deps: ApiDeps): Router {
     "/invites/accept",
     rateLimit({ windowMs: 15 * 60 * 1000, max: 20, key: (req) => `invite:${req.ip}` }),
     async (req, res) => {
-      const body = parse(
+      const body = parseBody(
         z.object({
           token: z.string().min(10),
           password,
@@ -202,7 +184,7 @@ export function apiRouter(deps: ApiDeps): Router {
   });
 
   r.patch("/users/:id", auth, requireAdmin, async (req, res) => {
-    const body = parse(
+    const body = parseBody(
       z.object({ role: role.optional(), status: z.enum(["active", "disabled"]).optional() }),
       req,
       res,
@@ -226,7 +208,9 @@ export function apiRouter(deps: ApiDeps): Router {
       fail(res, 409, "last_admin", "You cannot demote or disable yourself or the last admin");
       return;
     }
-    res.json(await repo.updateUser(target.id, body));
+    const updated = await repo.updateUser(target.id, body);
+    deps.onUsersChanged?.();
+    res.json(updated);
   });
 
   // API keys --------------------------------------------------------------
@@ -236,7 +220,7 @@ export function apiRouter(deps: ApiDeps): Router {
   });
 
   r.post("/keys", auth, async (req, res) => {
-    const body = parse(z.object({ name: keyName }), req, res);
+    const body = parseBody(z.object({ name: keyName }), req, res);
     if (!body) return;
     const me = userOf(res);
     res.status(201).json(await repo.createApiKey(me.id, body.name, me.id));
@@ -253,7 +237,7 @@ export function apiRouter(deps: ApiDeps): Router {
   });
 
   r.post("/users/:id/keys", auth, requireAdmin, async (req, res) => {
-    const body = parse(z.object({ name: keyName }), req, res);
+    const body = parseBody(z.object({ name: keyName }), req, res);
     if (!body) return;
     const target = await repo.userById(param(req, "id"));
     if (!target || target.status !== "active") {
@@ -283,8 +267,12 @@ export function apiRouter(deps: ApiDeps): Router {
   });
 
   r.post("/servers", auth, requireAdmin, async (req, res) => {
-    const body = parse(createServer, req, res);
+    const body = parseBody(createServer, req, res);
     if (!body) return;
+    if (body.auth_type !== "none" && !body.credential) {
+      fail(res, 400, "invalid", `credential: required for ${body.auth_type} auth`);
+      return;
+    }
     const blocked = await deps.urlGuard.check(body.url);
     if (blocked) {
       fail(res, 400, "url_blocked", blocked);
@@ -305,7 +293,7 @@ export function apiRouter(deps: ApiDeps): Router {
   });
 
   r.patch("/servers/:id", auth, requireAdmin, async (req, res) => {
-    const body = parse(patchServer, req, res);
+    const body = parseBody(patchServer, req, res);
     if (!body) return;
     const current = await servers.get(param(req, "id"));
     if (!current) {
@@ -335,6 +323,14 @@ export function apiRouter(deps: ApiDeps): Router {
       body.auth_header_name !== undefined ? body.auth_header_name : current.auth_header_name;
     if (authType === "header" && !headerName) {
       fail(res, 400, "invalid", "auth_header_name is required for header auth");
+      return;
+    }
+    const willHaveCredential =
+      body.credential !== undefined
+        ? body.credential !== null
+        : current.credential_enc !== null && authType === current.auth_type;
+    if (authType !== "none" && !willHaveCredential) {
+      fail(res, 400, "invalid", `credential: required for ${authType} auth`);
       return;
     }
     const row = await servers.update(current.id, body);

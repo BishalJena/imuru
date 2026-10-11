@@ -5,6 +5,7 @@ import { requireJson, sessionAuth, userOf } from "./auth.js";
 import { safeEqual, sha256 } from "./crypto.js";
 import type { Repo } from "./repo.js";
 import type { ServerService } from "./servers.js";
+import { parseBody } from "./validate.js";
 import { STORE_SLUG, storeServerSlug, type StoreService } from "./stores.js";
 
 /** Dashboard API: /api/stores. Users manage their own stores; admins see all. */
@@ -19,19 +20,19 @@ export function storesRouter(repo: Repo, stores: StoreService): Router {
   });
 
   r.post("/", async (req, res) => {
-    const parsed = z
-      .object({
-        slug: z.string().regex(STORE_SLUG, "lowercase letters, digits and dashes; 2-20 characters"),
-      })
-      .refine((b) => !b.slug.includes("--"), "slug cannot contain --")
-      .safeParse(req.body ?? {});
-    if (!parsed.success) {
-      res.status(400).json({
-        error: { code: "invalid", message: parsed.error.issues.map((i) => i.message).join("; ") },
-      });
-      return;
-    }
-    const result = await stores.create(userOf(res).id, parsed.data.slug);
+    const body = parseBody(
+      z
+        .object({
+          slug: z
+            .string()
+            .regex(STORE_SLUG, "lowercase letters, digits and dashes; 2-20 characters"),
+        })
+        .refine((b) => !b.slug.includes("--"), { message: "cannot contain --", path: ["slug"] }),
+      req,
+      res,
+    );
+    if (!body) return;
+    const result = await stores.create(userOf(res).id, body.slug);
     if ("error" in result) {
       res.status(result.error === "limit" ? 429 : 409).json({
         error: {

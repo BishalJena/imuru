@@ -66,7 +66,15 @@ describe("tool policies", () => {
     expect((await c.listTools()).tools.map((t) => t.name)).not.toContain("alpha__echo");
     const call = await c.callTool({ name: "alpha__echo", arguments: { text: "x" } });
     expect(call).toMatchObject({ isError: true, content: [{ text: "Not permitted" }] });
-    const rows = await gw.repo.listAudit({ outcome: "denied", limit: 5 });
+    // Audit rows are written asynchronously after the response.
+    let rows: Awaited<ReturnType<typeof gw.repo.listAudit>> = [];
+    await until(
+      () => rows.length > 0,
+      3000,
+      async () => {
+        rows = await gw.repo.listAudit({ outcome: "denied", limit: 5 });
+      },
+    );
     expect(rows[0]).toMatchObject({ user_email: "m@test.dev", server_slug: "alpha", tool: "echo" });
     await c.close();
   });

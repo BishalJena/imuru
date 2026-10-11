@@ -71,11 +71,13 @@ export function createApp(deps: AppDeps): Express {
       : deps.policies
         ? { isAllowed: deps.policies.isAllowed }
         : {}),
-    onCall: (e) => {
+    // Awaited before the result is returned: a client never sees the result of
+    // a call that is not in the audit log.
+    onCall: async (e) => {
       // Label by known servers only: made-up tool names must not create series.
       const label = e.server && registry.get(e.server) ? e.server : "unknown";
       metrics.recordCall(label, e.outcome, e.principal.via, e.durationMs);
-      void repo
+      await repo
         .audit({
           userId: e.principal.userId,
           userEmail: e.principal.email,
@@ -117,6 +119,7 @@ export function createApp(deps: AppDeps): Express {
       urlGuard: deps.urlGuard,
       publicUrl: config.PUBLIC_URL,
       secureCookies: config.PUBLIC_URL.startsWith("https://"),
+      onUsersChanged: () => mcp.notifyAll(),
     }),
   );
 

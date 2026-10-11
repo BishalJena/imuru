@@ -8,9 +8,9 @@ import type { Repo } from "./repo.js";
 
 const body = z.object({
   messages: z
-    .array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().min(1).max(8000) }))
+    .array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().min(1).max(200_000) }))
     .min(1)
-    .max(40),
+    .max(1000),
 });
 
 /** POST /api/chat: runs the agent and streams its steps as server-sent events. */
@@ -62,7 +62,11 @@ export function chatRouter(deps: {
       try {
         await runAgent({
           userId: user.id,
-          history: parsed.data.messages,
+          // The model sees the most recent turns only, each clipped, so a long
+          // conversation keeps working instead of failing validation.
+          history: parsed.data.messages
+            .slice(-40)
+            .map((m) => ({ ...m, text: m.text.slice(0, 8000) })),
           provider: deps.provider,
           signer: deps.signer,
           mcpUrl: deps.mcpUrl(),

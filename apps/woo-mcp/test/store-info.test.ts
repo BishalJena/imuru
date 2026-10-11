@@ -101,12 +101,12 @@ async function call(name: string, args: object, auth = `Bearer ${TOKEN}`) {
 }
 
 describe("store info", () => {
-  it("reports a manual UTC offset as the store timezone (W1)", async () => {
+  it("reports a manual UTC offset as the store timezone", async () => {
     const { body } = await call("get_store_info", {});
     expect(body.result.structuredContent.timezone).toBe("UTC+05:30");
   });
 
-  it("fetches site info once for concurrent callers (W4)", async () => {
+  it("fetches site info once for concurrent callers", async () => {
     siteCalls = 0;
     await new Promise((r) => setTimeout(r, 1)); // cache warm from the previous test
     const fresh = createApp(
@@ -145,7 +145,7 @@ describe("store info", () => {
     expect(siteCalls).toBe(1);
   });
 
-  it("list_orders still answers when site info fails (W3)", async () => {
+  it("list_orders still answers when site info fails", async () => {
     siteFails = true;
     const fresh = createApp(
       config,
@@ -189,7 +189,7 @@ describe("store info", () => {
   });
 });
 
-describe("auth scheme (W6)", () => {
+describe("auth scheme", () => {
   it("accepts the bearer scheme case-insensitively", async () => {
     const { status } = await call("get_store_info", {}, `bearer ${TOKEN}`);
     expect(status).toBe(200);

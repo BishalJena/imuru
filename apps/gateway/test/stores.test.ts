@@ -55,7 +55,7 @@ describe("stores API", () => {
 
   it("validates slugs", async () => {
     const asAdmin = await gw.login(ADMIN.email, ADMIN.password);
-    // Must be a valid DNS label once prefixed: no trailing dash (C6).
+    // Must be a valid DNS label once prefixed: no trailing dash.
     for (const slug of ["A", "x", "has space", "a--b", "a".repeat(25), "shop-", "-shop"]) {
       expect(
         (await asAdmin("/api/stores", { method: "POST", body: JSON.stringify({ slug }) })).status,
@@ -117,7 +117,7 @@ describe("internal API", () => {
 });
 
 describe("store lifecycle guards", () => {
-  it("refuses to register or mark ready a store whose deletion was requested (P3)", async () => {
+  it("refuses to register or mark ready a store whose deletion was requested", async () => {
     const asAdmin = await gw.login(ADMIN.email, ADMIN.password);
     const created = await (
       await asAdmin("/api/stores", { method: "POST", body: JSON.stringify({ slug: "racer" }) })
@@ -144,7 +144,7 @@ describe("store lifecycle guards", () => {
     expect(res.status).toBe(409);
   });
 
-  it("reserves store-* slugs for provisioned stores (G3)", async () => {
+  it("reserves store-* slugs for provisioned stores", async () => {
     const asAdmin = await gw.login(ADMIN.email, ADMIN.password);
     const res = await asAdmin("/api/servers", {
       method: "POST",
@@ -158,7 +158,7 @@ describe("store lifecycle guards", () => {
     expect(res.status).toBe(400);
   });
 
-  it("the provisioner path never deletes a server it does not manage (G3)", async () => {
+  it("the provisioner path never deletes a server it does not manage", async () => {
     await gw.servers.create({
       slug: "store-legacy",
       name: "Admin's",

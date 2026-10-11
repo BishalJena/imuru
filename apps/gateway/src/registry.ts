@@ -41,7 +41,11 @@ export class Registry extends EventEmitter<{ toolsChanged: [] }> {
     return upstream;
   }
 
-  async remove(slug: string): Promise<void> {
+  remove(slug: string): Promise<void> {
+    return this.serialized(slug, () => this.removeNow(slug));
+  }
+
+  private async removeNow(slug: string): Promise<void> {
     const upstream = this.upstreams.get(slug);
     if (!upstream) return;
     this.upstreams.delete(slug);
@@ -50,10 +54,29 @@ export class Registry extends EventEmitter<{ toolsChanged: [] }> {
     this.emit("toolsChanged");
   }
 
-  /** Replace a server's connection settings: closes the old client and connects anew. */
-  async replace(config: UpstreamConfig): Promise<Upstream> {
-    await this.remove(config.slug);
-    return this.add(config);
+  /** Pending replace/remove per slug; the next one waits for it. */
+  private readonly pending = new Map<string, Promise<unknown>>();
+
+  /** Runs `fn` after any earlier replace/remove of the same slug has finished. */
+  private serialized<T>(slug: string, fn: () => Promise<T>): Promise<T> {
+    const run = (this.pending.get(slug) ?? Promise.resolve()).catch(() => undefined).then(fn);
+    this.pending.set(slug, run);
+    void run.finally(() => {
+      if (this.pending.get(slug) === run) this.pending.delete(slug);
+    });
+    return run;
+  }
+
+  /**
+   * Replace a server's connection settings: closes the old client and
+   * connects anew. Concurrent replaces of one slug run one after another, so
+   * the last call's settings are the ones that stay live.
+   */
+  replace(config: UpstreamConfig): Promise<Upstream> {
+    return this.serialized(config.slug, async () => {
+      await this.removeNow(config.slug);
+      return this.add(config);
+    });
   }
 
   get(slug: string): Upstream | undefined {

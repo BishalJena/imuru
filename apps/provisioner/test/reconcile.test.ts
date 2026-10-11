@@ -164,7 +164,7 @@ describe("Reconciler", () => {
     expect(calls.filter((c) => c.startsWith("report") && c.includes("ready"))).toHaveLength(3);
   });
 
-  it("does not let one slow install block other stores (P1)", async () => {
+  it("does not let one slow install block other stores", async () => {
     const work = [store({ id: "a", slug: "slow" })];
     const { calls, r, release } = fakes(work, { holdInstall: ["slow"] });
     await r.tick();
@@ -178,7 +178,7 @@ describe("Reconciler", () => {
     expect(calls).toContain("installed store-slow");
   });
 
-  it("does not start the same store twice while it is in flight (P1)", async () => {
+  it("does not start the same store twice while it is in flight", async () => {
     const { calls, r, release } = fakes([store({ id: "a", slug: "slow" })], {
       holdInstall: ["slow"],
     });
@@ -189,7 +189,7 @@ describe("Reconciler", () => {
     expect(calls.filter((c) => c.startsWith("helm install"))).toHaveLength(1);
   });
 
-  it("deletions waiting on a terminating namespace never starve provisioning (P2)", async () => {
+  it("deletions waiting on a terminating namespace never starve provisioning", async () => {
     const deleting = ["d1", "d2", "d3", "d4"].map((slug, i) =>
       store({ id: `del${i}`, slug, desired: "absent", status: "deleting" }),
     );
@@ -205,7 +205,7 @@ describe("Reconciler", () => {
     ).toEqual([]);
   });
 
-  it("a delete requested mid-install wins: no registration, no 'ready' (P3)", async () => {
+  it("a delete requested mid-install wins: no registration, no 'ready'", async () => {
     const { calls, r } = fakes([store({ slug: "gone" })], { cancelled: ["gone"] });
     await r.tick();
     await r.idle();

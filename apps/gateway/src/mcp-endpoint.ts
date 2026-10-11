@@ -25,7 +25,7 @@ export interface CallEvent {
 
 export interface McpEndpointOptions {
   sessionIdleMs: number;
-  onCall: (event: CallEvent) => void;
+  onCall: (event: CallEvent) => void | Promise<void>;
   /** Tool permission check. Default: everything allowed. */
   isAllowed?: (principal: Principal, server: string, tool: string) => boolean;
 }
@@ -64,7 +64,7 @@ export function mcpRouter(
       const name = request.params.name;
       const parts = splitToolName(name);
       if (parts && !isAllowed(principal, parts.slug, parts.tool)) {
-        opts.onCall({
+        await opts.onCall({
           principal,
           server: parts.slug,
           tool: parts.tool,
@@ -81,7 +81,7 @@ export function mcpRouter(
           : ((
               res.result.content?.find((c) => c.type === "text") as { text?: string } | undefined
             )?.text?.slice(0, 500) ?? null);
-      opts.onCall({
+      await opts.onCall({
         principal,
         server: res.server,
         tool: res.tool,

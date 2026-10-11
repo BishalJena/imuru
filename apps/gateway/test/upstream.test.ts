@@ -17,7 +17,7 @@ const make = (url: string, over: Partial<ConstructorParameters<typeof Upstream>[
     ...over,
   });
 
-describe("Upstream connection lifecycle (G1)", () => {
+describe("Upstream connection lifecycle", () => {
   it("a connect that finishes after the server was disabled does not bring it back", async () => {
     const f = await fakeUpstream({ name: "slowinit", initDelayMs: 300 });
     servers.push(f.server);
@@ -54,7 +54,7 @@ describe("Upstream connection lifecycle (G1)", () => {
   });
 });
 
-describe("Upstream call errors (G9)", () => {
+describe("Upstream call errors", () => {
   it("an error returned by the upstream is a tool error with its message, not 'unreachable'", async () => {
     const f = await fakeUpstream({ name: "alpha" });
     servers.push(f.server);

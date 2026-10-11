@@ -65,7 +65,6 @@ export class ServerService {
    * server the admin deleted stays deleted (tombstone).
    */
   async seed(seeds: SeedServer[]): Promise<void> {
-    await this.db.query("CREATE TABLE IF NOT EXISTS removed_seeds (slug text PRIMARY KEY)");
     for (const [i, s] of seeds.entries()) {
       const removed = await this.db.query("SELECT 1 FROM removed_seeds WHERE slug = $1", [s.slug]);
       if (removed.rowCount) continue;
@@ -74,7 +73,8 @@ export class ServerService {
          VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8)
          ON CONFLICT (slug) DO UPDATE SET url = EXCLUDED.url, auth_type = EXCLUDED.auth_type,
            auth_header_name = EXCLUDED.auth_header_name, credential_enc = EXCLUDED.credential_enc,
-           timeout_ms = EXCLUDED.timeout_ms, managed = true, updated_at = now()`,
+           timeout_ms = EXCLUDED.timeout_ms, managed = true, updated_at = now()
+         WHERE servers.managed`,
         [
           s.slug,
           s.name,

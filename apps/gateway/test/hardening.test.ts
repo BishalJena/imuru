@@ -21,13 +21,13 @@ afterAll(async () => {
   upstream.close();
 });
 
-describe("chat agent limits (G4)", () => {
+describe("chat agent limits", () => {
   it("the chat token outlives the longest allowed agent run", () => {
     expect(CHAT_TOKEN_TTL_MS).toBeGreaterThan(CHAT_RUN_TIMEOUT_MS);
   });
 });
 
-describe("login (G6)", () => {
+describe("login", () => {
   it("spends the same password-hashing work on unknown emails as on known ones", async () => {
     const time = async (email: string) => {
       const t = performance.now();
@@ -45,7 +45,7 @@ describe("login (G6)", () => {
   });
 });
 
-describe("server edits (G10)", () => {
+describe("server edits", () => {
   it("rejects clearing the header name of a header-authenticated server", async () => {
     const created = await (
       await asAdmin("/api/servers", {
@@ -68,7 +68,7 @@ describe("server edits (G10)", () => {
   });
 });
 
-describe("invites (G11)", () => {
+describe("invites", () => {
   it("re-inviting updates role and name and invalidates the earlier link", async () => {
     const invite = async (role: string, name: string) =>
       (
@@ -91,7 +91,7 @@ describe("invites (G11)", () => {
   });
 });
 
-describe("input validation (G13)", () => {
+describe("input validation", () => {
   it("returns 404 for malformed ids instead of a server error", async () => {
     expect(
       (
@@ -118,7 +118,7 @@ describe("input validation (G13)", () => {
   });
 });
 
-describe("metrics format (G12)", () => {
+describe("metrics format", () => {
   it("groups each metric's samples under its own HELP/TYPE header", async () => {
     const body = await (await fetch(`${gw.url}/metrics`)).text();
     const lines = body.split("\n");
@@ -133,7 +133,7 @@ describe("metrics format (G12)", () => {
   });
 });
 
-describe("auth scheme (W6, gateway side)", () => {
+describe("auth scheme (gateway)", () => {
   it("accepts the bearer scheme case-insensitively", async () => {
     const adminId = (await gw.repo.userByEmailWithHash(ADMIN.email))!.id;
     const { key } = await gw.repo.createApiKey(adminId, "case", adminId);
@@ -159,7 +159,7 @@ describe("auth scheme (W6, gateway side)", () => {
   });
 });
 
-describe("managed servers (G2)", () => {
+describe("managed servers", () => {
   it("their URL comes from Helm values or the provisioner and cannot be repointed through the API", async () => {
     await gw.servers.seed([
       {

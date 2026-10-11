@@ -95,7 +95,7 @@ describe("GatewayClient", () => {
     ).rejects.toBeInstanceOf(StoreCancelledError);
   });
 
-  it("a 409 for any other reason is a failure with the gateway's message, not a cancellation (R1)", async () => {
+  it("a 409 for any other reason is a failure with the gateway's message, not a cancellation", async () => {
     const err = await client()
       .registerServer("store-taken", { name: "T", url: "http://w", credential: "c".repeat(20) })
       .catch((e: unknown) => e);
