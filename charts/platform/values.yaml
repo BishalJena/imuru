@@ -4,6 +4,8 @@ global:
   tls:
     enabled: false
     clusterIssuer: ""
+    # With TLS on, plain HTTP requests get a permanent redirect to HTTPS (Traefik middleware).
+    redirectHttp: true
 
 app:
   # Dashboard, /api and /mcp share one host: <host>.<global.domain>.

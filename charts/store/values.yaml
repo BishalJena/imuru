@@ -4,6 +4,8 @@ global:
   tls:
     enabled: false
     clusterIssuer: ""
+    # With TLS on, plain HTTP requests get a permanent redirect to HTTPS (Traefik middleware).
+    redirectHttp: true
 
 store:
   # Public hostname is <host>.<global.domain> unless hostOverride is set.

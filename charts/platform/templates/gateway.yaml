@@ -124,9 +124,14 @@ kind: Ingress
 metadata:
   name: gateway
   labels: {{- include "platform.labels" (dict "ctx" $ "component" "gateway") | nindent 4 }}
-  {{- if and .Values.global.tls.enabled .Values.global.tls.clusterIssuer }}
+  {{- if .Values.global.tls.enabled }}
   annotations:
+    {{- if .Values.global.tls.clusterIssuer }}
     cert-manager.io/cluster-issuer: {{ .Values.global.tls.clusterIssuer }}
+    {{- end }}
+    {{- if .Values.global.tls.redirectHttp }}
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-redirect-https@kubernetescrd
+    {{- end }}
   {{- end }}
 spec:
   ingressClassName: traefik

@@ -81,6 +81,8 @@ e2e-stores: ## Multi-store provisioning end to end (several minutes)
 # DOMAIN:   base domain whose *.DOMAIN points at the VPS, e.g. 203.0.113.10.sslip.io
 REGISTRY ?=
 DOMAIN ?=
+# Extra helm flags for every release, e.g. --set global.tls.clusterIssuer=...
+PROD_EXTRA ?=
 PLATFORMS ?= linux/amd64,linux/arm64
 
 push: ## Build multi-arch images and push them to $(REGISTRY)
@@ -97,13 +99,13 @@ deploy-prod: ## Deploy all charts with values-prod.yaml to the current kube cont
 	@test -n "$(REGISTRY)" -a -n "$(DOMAIN)" || (echo "set REGISTRY=... DOMAIN=..." && exit 1)
 	helm upgrade --install store charts/store -n store --create-namespace -f charts/store/values-prod.yaml \
 		--set global.domain=$(DOMAIN) --set wooMcp.image.repository=$(REGISTRY)/woo-mcp --set wooMcp.image.tag=$(WOO_MCP_TAG) \
-		--wait --timeout $(HELM_TIMEOUT)
+		$(PROD_EXTRA) --wait --timeout $(HELM_TIMEOUT)
 	helm upgrade --install demo-upstreams charts/demo-upstreams -n demo-upstreams --create-namespace -f charts/demo-upstreams/values-prod.yaml \
-		--set everything.image.repository=$(REGISTRY)/everything --wait --timeout $(HELM_TIMEOUT)
+		--set everything.image.repository=$(REGISTRY)/everything $(PROD_EXTRA) --wait --timeout $(HELM_TIMEOUT)
 	helm upgrade --install platform charts/platform -n platform --create-namespace -f charts/platform/values-prod.yaml \
 		$(if $(PROD_SECRETS),-f $(PROD_SECRETS)) --set global.domain=$(DOMAIN) \
 		--set gateway.image.repository=$(REGISTRY)/gateway --set gateway.image.tag=$(GATEWAY_TAG) \
 		--set dashboard.image.repository=$(REGISTRY)/dashboard --set dashboard.image.tag=$(DASHBOARD_TAG) \
 		--set provisioner.image.repository=$(REGISTRY)/provisioner --set provisioner.image.tag=$(PROVISIONER_TAG) \
 		--set provisioner.wooMcpImage.repository=$(REGISTRY)/woo-mcp --set provisioner.wooMcpImage.tag=$(WOO_MCP_TAG) \
-		--wait --timeout $(HELM_TIMEOUT)
+		$(PROD_EXTRA) --wait --timeout $(HELM_TIMEOUT)
