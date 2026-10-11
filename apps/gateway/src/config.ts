@@ -48,7 +48,10 @@ const schema = z.object({
   UPSTREAM_ALLOWED_HOSTS: csv,
   // URL the chat agent uses to reach this gateway's own /mcp.
   SELF_MCP_URL: z.url().default("http://127.0.0.1:8080/mcp"),
-  LLM_PROVIDER: z.enum(["gemini", "none"]).default("gemini"),
+  LLM_PROVIDER: z.enum(["gemini", "openai-compatible", "none"]).default("gemini"),
+  // For openai-compatible, e.g. https://openrouter.ai/api/v1
+  LLM_BASE_URL: z.string().optional(),
+  LLM_API_KEY: z.string().optional(),
   LLM_MODEL: z.string().default("gemini-flash-latest"),
   GEMINI_API_KEY: z.string().optional(),
   // Shared with the provisioner; enables /internal and the stores API when set.

@@ -144,7 +144,7 @@ Readiness never depends on another service's health. woo-mcp stays ready when Wo
 
 1. Mint a 5-minute token for the logged-in user (HMAC-signed `{uid, exp}`).
 2. Connect an MCP client to the gateway's own `/mcp` with that token, and call `tools/list`. The list is fresh every turn, so the agent sees exactly that user's permitted, currently enabled tools.
-3. Send the conversation and the tool declarations to Gemini. Each function call the model returns is executed with `tools/call`, and the result goes back to the model. This repeats until the model answers or `llm.maxSteps` (8) is reached.
+3. Send the conversation and the tool declarations to the model. The provider is pluggable behind a two-method interface: Gemini through `@google/genai` (production default), or any OpenAI-compatible endpoint (locally: OpenRouter). Each function call the model returns is executed with `tools/call`, and the result goes back to the model. This repeats until the model answers or `llm.maxSteps` (8) is reached.
 4. Stream `tool_call`, `tool_result`, `message` and `error` events. The UI renders each tool call as a card with arguments, result and duration.
 
 Every call made by the agent goes through the same authentication, permission checks and audit path as an external client, so it appears in the audit log under the user with `via = chat`. The system prompt tells the model to treat tool descriptions and results as untrusted data. The step cap bounds runaway loops.

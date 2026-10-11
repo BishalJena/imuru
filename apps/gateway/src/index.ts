@@ -4,7 +4,7 @@ import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { Sealer, TokenSigner } from "./crypto.js";
 import { createPool, migrate } from "./db.js";
-import { GeminiProvider } from "./llm.js";
+import { GeminiProvider, OpenAiCompatProvider, type LlmProvider } from "./llm.js";
 import { Policies } from "./policies.js";
 import { Registry } from "./registry.js";
 import { Repo } from "./repo.js";
@@ -69,10 +69,12 @@ await servers.loadAll();
 registry.start(config.HEALTH_INTERVAL_MS);
 
 const signer = new TokenSigner(config.SESSION_SECRET);
-const provider =
-  config.LLM_PROVIDER === "gemini" && config.GEMINI_API_KEY
-    ? new GeminiProvider(config.GEMINI_API_KEY, config.LLM_MODEL)
-    : null;
+let provider: LlmProvider | null = null;
+if (config.LLM_PROVIDER === "gemini" && config.GEMINI_API_KEY) {
+  provider = new GeminiProvider(config.GEMINI_API_KEY, config.LLM_MODEL);
+} else if (config.LLM_PROVIDER === "openai-compatible" && config.LLM_BASE_URL) {
+  provider = new OpenAiCompatProvider(config.LLM_BASE_URL, config.LLM_MODEL, config.LLM_API_KEY);
+}
 if (!provider) console.warn("chat agent disabled: no LLM API key configured");
 // Policy changes push tools/list_changed so clients re-list with the new rules.
 let notifyToolsChanged = () => {};

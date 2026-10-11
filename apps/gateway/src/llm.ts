@@ -120,3 +120,91 @@ export class GeminiProvider implements LlmProvider {
     };
   }
 }
+
+interface ChatMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | null;
+  tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[];
+  tool_call_id?: string;
+}
+
+/**
+ * Any OpenAI-compatible chat completions API (OpenRouter, OpenAI, a
+ * self-hosted model server). The key is optional for servers that need none.
+ */
+export class OpenAiCompatProvider implements LlmProvider {
+  constructor(
+    private readonly baseUrl: string,
+    private readonly model: string,
+    private readonly apiKey?: string,
+    private readonly timeoutMs = 300_000,
+  ) {}
+
+  start(input: Parameters<LlmProvider["start"]>[0]): LlmSession {
+    const messages: ChatMessage[] = [
+      { role: "system", content: input.system },
+      ...input.history.map((m) => ({ role: m.role, content: m.text }) as ChatMessage),
+    ];
+    const tools = input.tools.map((t) => ({
+      type: "function" as const,
+      function: {
+        name: t.name,
+        description: t.description.slice(0, 1000),
+        parameters: toGeminiSchema(t.inputSchema),
+      },
+    }));
+    const { baseUrl, model, apiKey, timeoutMs } = this;
+
+    return {
+      async step() {
+        const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            ...(tools.length ? { tools } : {}),
+            temperature: 0,
+          }),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (!res.ok)
+          throw new Error(
+            `LLM request failed: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`,
+          );
+        const body = (await res.json()) as { choices?: { message?: ChatMessage }[] };
+        const msg = body.choices?.[0]?.message;
+        if (!msg) throw new Error("LLM returned no message");
+        messages.push({
+          role: "assistant",
+          content: msg.content ?? null,
+          ...(msg.tool_calls ? { tool_calls: msg.tool_calls } : {}),
+        });
+        const calls = (msg.tool_calls ?? []).map((tc) => {
+          let args: Record<string, unknown> = {};
+          try {
+            args = JSON.parse(tc.function.arguments || "{}") as Record<string, unknown>;
+          } catch {
+            // Malformed arguments: pass none; the tool's own validation reports the problem back to the model.
+          }
+          return { id: tc.id, name: tc.function.name, args };
+        });
+        // Some models wrap reasoning in <think> tags; never show it as the answer.
+        const text = (msg.content ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+        return { text: calls.length ? null : text, calls };
+      },
+      addToolResults(results) {
+        for (const r of results) {
+          messages.push({
+            role: "tool",
+            tool_call_id: r.id,
+            content: r.isError ? `Error: ${r.text}` : JSON.stringify(r.structured ?? r.text),
+          });
+        }
+      },
+    };
+  }
+}

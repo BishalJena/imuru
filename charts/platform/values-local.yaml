@@ -3,3 +3,10 @@ global:
   storageClass: local-path
   tls:
     enabled: false
+
+# Chat model through OpenRouter (OpenAI-compatible). The key goes in the
+# gitignored values-secrets.local.yaml as llm.apiKey.
+llm:
+  provider: openai-compatible
+  baseUrl: https://openrouter.ai/api/v1
+  model: google/gemini-2.5-flash

@@ -4,6 +4,10 @@
 # on the volumes (products, orders) is untouched by both.
 set -euo pipefail
 
+# Address the intended cluster explicitly (make exports KUBE_CONTEXT for local runs).
+kubectl() { command kubectl ${KUBE_CONTEXT:+--context "$KUBE_CONTEXT"} "$@"; }
+helm() { command helm ${KUBE_CONTEXT:+--kube-context "$KUBE_CONTEXT"} "$@"; }
+
 NS="${STORE_NS:-store}"
 URL="${STORE_URL:-http://store.127.0.0.1.nip.io}"
 VALUES=(-f charts/store/values-local.yaml --set "wooMcp.image.tag=$(helm get values store -n "$NS" -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["wooMcp"]["image"]["tag"])')")

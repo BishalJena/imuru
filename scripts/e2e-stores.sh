@@ -4,6 +4,10 @@
 # provisioner's permission limits; then teardown of one store.
 set -euo pipefail
 
+# Address the intended cluster explicitly (make exports KUBE_CONTEXT for local runs).
+kubectl() { command kubectl ${KUBE_CONTEXT:+--context "$KUBE_CONTEXT"} "$@"; }
+helm() { command helm ${KUBE_CONTEXT:+--kube-context "$KUBE_CONTEXT"} "$@"; }
+
 DOMAIN="${DOMAIN:-127.0.0.1.nip.io}"
 APP_URL="${APP_URL:-http://app.${DOMAIN}}"
 PLATFORM_NS="${PLATFORM_NS:-platform}"

@@ -61,8 +61,11 @@ provisioner:
     limits: { cpu: "1", memory: 384Mi }
 
 llm:
+  # gemini | openai-compatible (any OpenAI-style API, e.g. OpenRouter)
   provider: gemini
   model: gemini-flash-latest
+  # For openai-compatible, e.g. https://openrouter.ai/api/v1
+  baseUrl: ""
   maxSteps: 8
   # Supply via --set llm.apiKey=... or a gitignored values-secrets file. Kept in
   # Secret platform/gateway; an empty value keeps whatever the Secret holds.

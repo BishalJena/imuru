@@ -68,6 +68,13 @@ spec:
               value: {{ .Values.llm.provider | quote }}
             - name: LLM_MODEL
               value: {{ .Values.llm.model | quote }}
+            {{- if eq .Values.llm.provider "openai-compatible" }}
+            - name: LLM_BASE_URL
+              value: {{ .Values.llm.baseUrl | quote }}
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef: { name: gateway, key: llm-api-key, optional: true }
+            {{- end }}
             - name: CHAT_MAX_STEPS
               value: {{ .Values.llm.maxSteps | quote }}
             - name: GEMINI_API_KEY

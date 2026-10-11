@@ -1,4 +1,7 @@
 CLUSTER := urumi
+# Local targets always address the k3d cluster, whatever the current kubectl context is.
+KUBE_CONTEXT ?= k3d-$(CLUSTER)
+export KUBE_CONTEXT
 K3D_CONFIG := scripts/k3d-config.yaml
 HELM_TIMEOUT := 15m
 # Content hash of each image's inputs: unchanged code keeps its tag, changed code gets a new one,
@@ -32,8 +35,7 @@ check: typecheck lint test ## Typecheck, lint and test
 
 cluster-up: ## Create the local k3d cluster (idempotent)
 	@k3d cluster list $(CLUSTER) >/dev/null 2>&1 || k3d cluster create --config $(K3D_CONFIG)
-	kubectl config use-context k3d-$(CLUSTER)
-	kubectl wait --for=condition=Ready nodes --all --timeout=120s
+	kubectl --context $(KUBE_CONTEXT) wait --for=condition=Ready nodes --all --timeout=120s
 
 cluster-down: ## Delete the local k3d cluster and all its data
 	k3d cluster delete $(CLUSTER)
@@ -50,19 +52,19 @@ images: ## Build app images and import them into the k3d cluster
 	k3d image import -c $(CLUSTER) urumi/woo-mcp:$(WOO_MCP_TAG) urumi/gateway:$(GATEWAY_TAG) urumi/dashboard:$(DASHBOARD_TAG) urumi/provisioner:$(PROVISIONER_TAG) urumi/everything:$(EVERYTHING_TAG)
 
 deploy-store: ## Install or upgrade the store release (namespace store)
-	helm upgrade --install store charts/store -n store --create-namespace \
+	helm upgrade --install --kube-context $(KUBE_CONTEXT) store charts/store -n store --create-namespace \
 		-f charts/store/values-local.yaml --set wooMcp.image.tag=$(WOO_MCP_TAG) \
 		--wait --timeout $(HELM_TIMEOUT)
 
 deploy-upstreams: ## Install or upgrade the in-cluster demo MCP servers (namespace demo-upstreams)
-	helm upgrade --install demo-upstreams charts/demo-upstreams -n demo-upstreams --create-namespace \
+	helm upgrade --install --kube-context $(KUBE_CONTEXT) demo-upstreams charts/demo-upstreams -n demo-upstreams --create-namespace \
 		-f charts/demo-upstreams/values-local.yaml --wait --timeout $(HELM_TIMEOUT)
 
 # Optional secrets (e.g. llm.apiKey) live in a gitignored file.
 PLATFORM_SECRETS := $(wildcard charts/platform/values-secrets.local.yaml)
 
 deploy-platform: ## Install or upgrade the platform release (namespace platform)
-	helm upgrade --install platform charts/platform -n platform --create-namespace \
+	helm upgrade --install --kube-context $(KUBE_CONTEXT) platform charts/platform -n platform --create-namespace \
 		-f charts/platform/values-local.yaml $(if $(PLATFORM_SECRETS),-f $(PLATFORM_SECRETS)) \
 		--set gateway.image.tag=$(GATEWAY_TAG) --set dashboard.image.tag=$(DASHBOARD_TAG) \
 		--set provisioner.image.tag=$(PROVISIONER_TAG) --set provisioner.wooMcpImage.tag=$(WOO_MCP_TAG) \
