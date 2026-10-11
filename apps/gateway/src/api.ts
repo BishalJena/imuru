@@ -338,8 +338,19 @@ export function apiRouter(deps: ApiDeps): Router {
   });
 
   r.delete("/servers/:id", auth, requireAdmin, async (req, res) => {
-    if (!(await servers.remove(param(req, "id")))) fail(res, 404, "not_found", "No such server");
-    else res.status(204).end();
+    const current = await servers.get(param(req, "id"));
+    if (!current) {
+      fail(res, 404, "not_found", "No such server");
+      return;
+    }
+    // Store servers go away with their store. Removing one here would leave a
+    // running store with no tools and no way for the provisioner to restore them.
+    if (current.managed) {
+      fail(res, 409, "managed", "This server is managed by the platform; delete its store instead");
+      return;
+    }
+    await servers.remove(current.id);
+    res.status(204).end();
   });
 
   // Audit -----------------------------------------------------------------

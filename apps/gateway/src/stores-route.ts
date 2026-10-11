@@ -92,7 +92,12 @@ export function internalRouter(
       .object({
         status: z.enum(["provisioning", "ready", "failed", "deleting"]),
         reason: z.string().max(2000).nullable().optional(),
-        url: z.url().nullable().optional(),
+        // Rendered as a link in the dashboard: only web URLs are allowed.
+        url: z
+          .url()
+          .refine((u) => /^https?:\/\//.test(u), "must be an http(s) URL")
+          .nullable()
+          .optional(),
       })
       .safeParse(req.body ?? {});
     if (!parsed.success) {
@@ -116,8 +121,12 @@ export function internalRouter(
       reason: parsed.data.reason ?? null,
       url: parsed.data.url ?? null,
     });
-    if (!row) res.status(404).json({ error: { code: "not_found", message: "No such store" } });
-    else res.json(row);
+    if (row) {
+      res.json(row);
+      return;
+    }
+    // The store was deleted after the read above: the conditional update refused it.
+    res.status(409).json({ error: { code: "deleting", message: "Store deletion was requested" } });
   });
 
   r.delete("/stores/:id", async (req, res) => {

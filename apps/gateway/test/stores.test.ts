@@ -136,6 +136,31 @@ describe("store lifecycle guards", () => {
     expect(gw.registry.get("store-racer")).toBeUndefined();
   });
 
+  it("a report that races a deletion cannot mark the store ready", async () => {
+    const asAdmin = await gw.login(ADMIN.email, ADMIN.password);
+    const created = await (
+      await asAdmin("/api/stores", { method: "POST", body: JSON.stringify({ slug: "late" }) })
+    ).json();
+    await asAdmin(`/api/stores/${created.id}`, { method: "DELETE" });
+    // The provisioner read the store before the deletion and reports afterwards.
+    const row = await gw.stores.report(created.id, { status: "ready", url: "http://x.test" });
+    expect(row).toBeNull();
+    expect((await gw.stores.get(created.id))!.status).toBe("deleting");
+  });
+
+  it("only accepts http(s) store URLs, since the dashboard renders them as links", async () => {
+    const asAdmin = await gw.login(ADMIN.email, ADMIN.password);
+    const created = await (
+      await asAdmin("/api/stores", { method: "POST", body: JSON.stringify({ slug: "linky" }) })
+    ).json();
+    const res = await internal(`/stores/${created.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "ready", url: "javascript:alert(1)" }),
+    });
+    expect(res.status).toBe(400);
+    expect((await gw.stores.get(created.id))!.url).toBeNull();
+  });
+
   it("refuses to register a server for a store that does not exist", async () => {
     const res = await internal("/servers/store-ghost", {
       method: "PUT",

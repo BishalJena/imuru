@@ -121,13 +121,20 @@ export class StoreService {
     ).rows;
   }
 
+  /**
+   * Records what the provisioner observed. A store whose deletion was requested
+   * keeps its "deleting" status: the check runs in the same UPDATE, so a
+   * deletion that lands between the provisioner's read and this write still wins.
+   * Returns null when nothing was updated.
+   */
   async report(
     id: string,
     patch: { status: StoreStatus; reason?: string | null; url?: string | null },
-  ) {
+  ): Promise<StoreRow | null> {
     const r = await this.db.query<StoreRow>(
       `UPDATE stores SET status = $2, reason = $3, url = COALESCE($4, url), updated_at = now()
-       WHERE id = $1 RETURNING *`,
+       WHERE id = $1 AND (desired = 'present' OR $2 = 'deleting')
+       RETURNING *`,
       [id, patch.status, patch.reason ?? null, patch.url ?? null],
     );
     return r.rows[0] ?? null;

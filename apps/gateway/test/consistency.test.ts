@@ -119,6 +119,21 @@ describe("seeds", () => {
   });
 });
 
+describe("managed servers", () => {
+  it("an admin cannot remove a platform-managed server; the store lifecycle does", async () => {
+    const row = await gw.servers.upsertManaged({
+      slug: "store-kept",
+      name: "Kept",
+      url: "http://store-kept.svc:3000/mcp",
+      credential: "t".repeat(32),
+    });
+    const res = await asAdmin(`/api/servers/${row!.id}`, { method: "DELETE" });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("managed");
+    expect((await gw.servers.get(row!.id))?.slug).toBe("store-kept");
+  });
+});
+
 describe("role changes", () => {
   it("push tools/list_changed to the user's open sessions", async () => {
     const adminId = (await gw.repo.userByEmailWithHash(ADMIN.email))!.id;
