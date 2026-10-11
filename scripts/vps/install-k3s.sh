@@ -11,6 +11,7 @@ export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 kubectl wait --for=condition=Ready nodes --all --timeout=300s
 
 if ! command -v helm >/dev/null; then
+  # Only needed here to install cert-manager; releases are deployed from the workstation.
   curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4 | bash
 fi
 

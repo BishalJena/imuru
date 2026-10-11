@@ -13,7 +13,7 @@ DASHBOARD_TAG := $(call src_hash,apps/dashboard)
 PROVISIONER_TAG := $(call src_hash,apps/provisioner charts/store)
 EVERYTHING_TAG := 2026.8.31
 
-.PHONY: help install typecheck lint test check cluster-up cluster-down deploy-store deploy-upstreams deploy-platform deploy-local push deploy-prod helm-lint e2e images
+.PHONY: vps-setup vps-images vps-tunnel help install typecheck lint test check cluster-up cluster-down deploy-store deploy-upstreams deploy-platform deploy-local push deploy-prod helm-lint e2e images
 
 help:
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -111,3 +111,27 @@ deploy-prod: ## Deploy all charts with values-prod.yaml to the current kube cont
 		--set provisioner.image.repository=$(REGISTRY)/provisioner --set provisioner.image.tag=$(PROVISIONER_TAG) \
 		--set provisioner.wooMcpImage.repository=$(REGISTRY)/woo-mcp --set provisioner.wooMcpImage.tag=$(WOO_MCP_TAG) \
 		$(PROD_EXTRA) --wait --timeout $(HELM_TIMEOUT)
+
+# --- Single VM without a registry ----------------------------------------------
+# VPS: ssh target, e.g. ubuntu@203.0.113.10. SSH_KEY: private key for it.
+VPS ?=
+SSH_KEY ?= ~/.ssh/urumi-oci
+VPS_KUBECONFIG ?= $(HOME)/.kube/urumi-vps.yaml
+SSH = ssh -i $(SSH_KEY) -o StrictHostKeyChecking=accept-new $(VPS)
+
+vps-setup: ## Prepare the VM: firewall, k3s, cert-manager; fetch its kubeconfig
+	@test -n "$(VPS)" || (echo "set VPS=ubuntu@<ip>" && exit 1)
+	$(SSH) 'sudo bash -s' < scripts/vps/prepare-host.sh
+	$(SSH) 'sudo bash -s' < scripts/vps/install-k3s.sh
+	$(SSH) 'sudo cat /etc/rancher/k3s/k3s.yaml' | sed -e 's#https://127.0.0.1:6443#https://127.0.0.1:16443#' -e 's/: default$$/: urumi-vps/' > $(VPS_KUBECONFIG)
+	chmod 600 $(VPS_KUBECONFIG)
+	@echo "kubeconfig: $(VPS_KUBECONFIG) (run make vps-tunnel in another terminal)"
+
+vps-images: ## Stream locally built arm64 images straight into the VM's k3s (no registry)
+	@test -n "$(VPS)" || (echo "set VPS=ubuntu@<ip>" && exit 1)
+	docker save urumi/woo-mcp:$(WOO_MCP_TAG) urumi/gateway:$(GATEWAY_TAG) urumi/dashboard:$(DASHBOARD_TAG) \
+		urumi/provisioner:$(PROVISIONER_TAG) urumi/everything:$(EVERYTHING_TAG) | gzip -1 | \
+		$(SSH) 'gunzip | sudo k3s ctr images import -'
+
+vps-tunnel: ## Forward the VM's Kubernetes API to localhost:16443 (keep running)
+	$(SSH) -N -L 16443:127.0.0.1:6443
