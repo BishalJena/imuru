@@ -6,7 +6,16 @@ global:
     enabled: true
     clusterIssuer: letsencrypt-prod
 
+# Sized for one core shared with k3s system pods (see the store chart's values-prod).
 gateway:
   resources:
-    requests: { cpu: 100m, memory: 192Mi }
+    requests: { cpu: 50m, memory: 160Mi }
     limits: { cpu: "1", memory: 512Mi }
+
+postgres:
+  persistence:
+    size: 5Gi
+
+# Each extra store requests ~0.3 CPU; one per user fits a small VM.
+provisioner:
+  maxStoresPerUser: 1

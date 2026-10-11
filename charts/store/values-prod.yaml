@@ -1,3 +1,4 @@
+# Production-like target: single-node k3s on a small VM (1 core / 6 GB tested).
 # Set global.domain at install time: --set global.domain=<vps-ip>.sslip.io (or a real domain).
 global:
   domain: ""
@@ -6,16 +7,28 @@ global:
     enabled: true
     clusterIssuer: letsencrypt-prod
 
+# CPU requests sized for one core shared with k3s system pods (requests decide
+# scheduling; observed idle usage is a few millicores). Limits allow bursts.
 mariadb:
   persistence:
     size: 10Gi
   resources:
-    requests: { cpu: 250m, memory: 512Mi }
-    limits: { cpu: "2", memory: 1536Mi }
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 1Gi }
 
 wordpress:
   persistence:
     size: 10Gi
   resources:
-    requests: { cpu: 250m, memory: 384Mi }
-    limits: { cpu: "2", memory: 1Gi }
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 768Mi }
+
+bootstrap:
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { cpu: "1", memory: 768Mi }
+
+wooMcp:
+  resources:
+    requests: { cpu: 25m, memory: 96Mi }
+    limits: { cpu: 500m, memory: 256Mi }
