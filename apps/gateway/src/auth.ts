@@ -30,7 +30,12 @@ export function userOf(res: Response): User {
 export function readCookie(req: Request, name: string): string | undefined {
   for (const part of (req.header("cookie") ?? "").split(";")) {
     const [k, ...v] = part.trim().split("=");
-    if (k === name) return decodeURIComponent(v.join("="));
+    if (k !== name) continue;
+    try {
+      return decodeURIComponent(v.join("="));
+    } catch {
+      return undefined; // malformed percent-encoding: treat as no cookie
+    }
   }
   return undefined;
 }

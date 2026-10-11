@@ -43,7 +43,15 @@ export class GatewayClient implements Gateway {
       body: body === undefined ? null : JSON.stringify(body),
       signal: AbortSignal.timeout(15_000),
     });
-    if (res.status === 409) throw new StoreCancelledError(`${method} ${path}`);
+    if (res.status === 409) {
+      const error = (
+        (await res.json().catch(() => ({}))) as { error?: { code?: string; message?: string } }
+      ).error;
+      // Only "deleting" means the store was deleted meanwhile; other conflicts
+      // (a slug owned by an admin-created server) are failures with a reason.
+      if (error?.code === "deleting") throw new StoreCancelledError(`${method} ${path}`);
+      throw new Error(error?.message ?? `gateway ${method} ${path}: HTTP 409`);
+    }
     if (!res.ok && res.status !== 404)
       throw new Error(`gateway ${method} ${path}: HTTP ${res.status}`);
     return res;

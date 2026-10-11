@@ -10,15 +10,25 @@ export interface PolicyRule {
   created_at: string;
 }
 
-/** `*` matches any run of characters; everything else is literal. */
+const compiled = new Map<string, RegExp>();
+
+/** `*` matches any run of characters; patterns are compiled once and reused. */
 export function matches(pattern: string, value: string): boolean {
-  const re = new RegExp(
+  let re = compiled.get(pattern);
+  if (!re) {
+    re = toRegExp(pattern);
+    compiled.set(pattern, re);
+  }
+  return re.test(value);
+}
+
+function toRegExp(pattern: string): RegExp {
+  return new RegExp(
     `^${pattern
       .split("*")
       .map((p) => p.replace(/[.+?^${}()|[\]\\-]/g, "\\$&"))
       .join(".*")}$`,
   );
-  return re.test(value);
 }
 
 /**

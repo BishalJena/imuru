@@ -95,6 +95,8 @@ export class StoreService {
       return { store: r.rows[0]! };
     } catch (err) {
       await client.query("ROLLBACK").catch(() => undefined);
+      // Another user took the slug between our check and our insert.
+      if ((err as { code?: string }).code === "23505") return { error: "taken" };
       throw err;
     } finally {
       client.release();

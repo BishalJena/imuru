@@ -72,7 +72,9 @@ export function createApp(deps: AppDeps): Express {
         ? { isAllowed: deps.policies.isAllowed }
         : {}),
     onCall: (e) => {
-      metrics.recordCall(e.server, e.outcome, e.principal.via, e.durationMs);
+      // Label by known servers only: made-up tool names must not create series.
+      const label = e.server && registry.get(e.server) ? e.server : "unknown";
+      metrics.recordCall(label, e.outcome, e.principal.via, e.durationMs);
       void repo
         .audit({
           userId: e.principal.userId,

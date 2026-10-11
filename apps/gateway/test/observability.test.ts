@@ -51,7 +51,8 @@ describe("/metrics", () => {
       'urumi_gateway_tool_calls_total{server="alpha",outcome="ok",via="mcp"} 2',
     );
     expect(body).toContain(
-      'urumi_gateway_tool_calls_total{server="nope",outcome="unknown_tool",via="mcp"} 1',
+      // Made-up server names are labelled "unknown" (bounded cardinality).
+      'urumi_gateway_tool_calls_total{server="unknown",outcome="unknown_tool",via="mcp"} 1',
     );
     expect(body).toContain('urumi_gateway_tool_call_duration_seconds_count{server="alpha"} 2');
     expect(body).toMatch(/urumi_gateway_upstream_up\{server="alpha",status="connected"\} 1/);

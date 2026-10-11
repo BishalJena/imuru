@@ -164,9 +164,8 @@ export class Upstream extends EventEmitter<{ changed: [] }> {
   }
 
   private update(status: UpstreamStatus, error: string | null, tools: Tool[]): void {
-    const changed =
-      status !== this.status ||
-      JSON.stringify(tools.map((t) => t.name)) !== JSON.stringify(this.tools.map((t) => t.name));
+    // Compare whole definitions: a changed schema or description must reach clients too.
+    const changed = status !== this.status || JSON.stringify(tools) !== JSON.stringify(this.tools);
     this.status = status;
     this.lastError = error;
     this.tools = tools;

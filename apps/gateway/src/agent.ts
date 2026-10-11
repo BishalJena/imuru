@@ -37,11 +37,10 @@ export async function runAgent(opts: {
 }): Promise<void> {
   const token = opts.signer.sign({ uid: opts.userId, exp: Date.now() + CHAT_TOKEN_TTL_MS });
   const client = new Client({ name: "urumi-chat-agent", version: "0.1.0" });
-  await client.connect(
-    new StreamableHTTPClientTransport(new URL(opts.mcpUrl), {
-      requestInit: { headers: { Authorization: `Bearer ${token}` } },
-    }),
-  );
+  const transport = new StreamableHTTPClientTransport(new URL(opts.mcpUrl), {
+    requestInit: { headers: { Authorization: `Bearer ${token}` } },
+  });
+  await client.connect(transport);
   try {
     // Listed fresh on every turn, so disabled servers' tools are gone immediately.
     const { tools } = await client.listTools();
@@ -65,18 +64,22 @@ export async function runAgent(opts: {
         return;
       }
       if (opts.signal?.aborted) return;
-      const { text, calls } = await session.step();
+      const { text, calls } = await session.step(opts.signal);
       if (calls.length === 0) {
         opts.emit({ type: "message", text: text || "(no answer)" });
         return;
       }
       const results: ToolCallResult[] = [];
       for (const call of calls) {
+        if (opts.signal?.aborted) return;
         opts.emit({ type: "tool_call", id: call.id, name: call.name, args: call.args });
         const started = performance.now();
         let result: ToolCallResult;
         try {
-          const r = await client.callTool({ name: call.name, arguments: call.args });
+          const r = await client.callTool(
+            { name: call.name, arguments: call.args },
+            opts.signal ? { signal: opts.signal } : {},
+          );
           const text = (r.content as { type: string; text?: string }[])
             .filter((c) => c.type === "text")
             .map((c) => c.text ?? "")
@@ -108,6 +111,9 @@ export async function runAgent(opts: {
       text: `Stopped after ${opts.maxSteps} tool steps without a final answer.`,
     });
   } finally {
+    // close() alone leaves the session open on the gateway until the idle
+    // sweep; DELETE it so each chat request cleans up after itself.
+    await transport.terminateSession().catch(() => undefined);
     await client.close().catch(() => undefined);
   }
 }

@@ -351,6 +351,14 @@ export function apiRouter(deps: ApiDeps): Router {
   r.get("/audit", auth, async (req, res) => {
     const me = userOf(res);
     const q = req.query as Record<string, string | undefined>;
+    if (q.user && !UUID.test(q.user)) {
+      fail(res, 400, "invalid", "user must be a user id");
+      return;
+    }
+    if (q.since && Number.isNaN(Date.parse(q.since))) {
+      fail(res, 400, "invalid", "since must be a date");
+      return;
+    }
     const userId = me.role === "admin" ? q.user || undefined : me.id;
     const filter: Parameters<Repo["listAudit"]>[0] = {
       limit: Math.min(Math.max(Math.trunc(Number(q.limit)) || 200, 1), 1000),
@@ -358,7 +366,7 @@ export function apiRouter(deps: ApiDeps): Router {
     if (userId) filter.userId = userId;
     if (q.server) filter.server = q.server;
     if (q.outcome) filter.outcome = q.outcome;
-    if (q.since && !Number.isNaN(Date.parse(q.since))) filter.since = q.since;
+    if (q.since) filter.since = new Date(q.since).toISOString();
     res.json(await repo.listAudit(filter));
   });
 

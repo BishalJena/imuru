@@ -26,7 +26,8 @@ export interface ToolCallResult {
  * format; the agent only appends user turns and tool results.
  */
 export interface LlmSession {
-  step(): Promise<{ text: string | null; calls: ToolCallRequest[] }>;
+  /** The signal aborts the model request when the user disconnects. */
+  step(signal?: AbortSignal): Promise<{ text: string | null; calls: ToolCallRequest[] }>;
   addToolResults(results: ToolCallResult[]): void;
 }
 
@@ -115,11 +116,12 @@ export class GeminiProvider implements LlmProvider {
     let callSeq = 0;
 
     return {
-      async step() {
+      async step(signal?: AbortSignal) {
         const res = await ai.models.generateContent({
           model,
           contents,
           config: {
+            ...(signal ? { abortSignal: signal } : {}),
             systemInstruction: input.system,
             ...(functionDeclarations.length ? { tools: [{ functionDeclarations }] } : {}),
           },
@@ -186,7 +188,7 @@ export class OpenAiCompatProvider implements LlmProvider {
     const { baseUrl, model, apiKey, timeoutMs } = this;
 
     return {
-      async step() {
+      async step(signal?: AbortSignal) {
         const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
           method: "POST",
           headers: {
@@ -199,7 +201,9 @@ export class OpenAiCompatProvider implements LlmProvider {
             ...(tools.length ? { tools } : {}),
             temperature: 0,
           }),
-          signal: AbortSignal.timeout(timeoutMs),
+          signal: signal
+            ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+            : AbortSignal.timeout(timeoutMs),
         });
         if (!res.ok)
           throw new Error(

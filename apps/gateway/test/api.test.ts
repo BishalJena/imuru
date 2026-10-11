@@ -111,7 +111,8 @@ describe("roles", () => {
     ).json();
     expect(created.key).toMatch(/^urk_[A-Za-z0-9]{8}_[A-Za-z0-9_-]{43}$/);
     const listed = await (await asMember("/api/keys")).json();
-    expect(JSON.stringify(listed)).not.toContain(created.key.split("_")[2]);
+    // The secret is everything after "urk_<8-char id>_"; base64url may itself contain "_".
+    expect(JSON.stringify(listed)).not.toContain(created.key.slice(13));
     expect((await asMember(`/api/keys/${created.id}`, { method: "DELETE" })).status).toBe(204);
     expect((await asMember("/api/keys")).ok).toBe(true);
   });

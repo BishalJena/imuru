@@ -21,11 +21,14 @@ export interface Kube {
  * token. The cluster CA comes from NODE_EXTRA_CA_CERTS (set in the Deployment).
  */
 export class InClusterKube implements Kube {
-  private readonly base = `https://${process.env.KUBERNETES_SERVICE_HOST}:${process.env.KUBERNETES_SERVICE_PORT}`;
+  constructor(
+    private readonly base = `https://${process.env.KUBERNETES_SERVICE_HOST}:${process.env.KUBERNETES_SERVICE_PORT}`,
+    private readonly tokenFile = `${SA_DIR}/token`,
+  ) {}
 
   private async call(method: string, path: string, body?: unknown): Promise<Response> {
     // Re-read per call: projected tokens are rotated by the kubelet.
-    const token = (await readFile(`${SA_DIR}/token`, "utf8")).trim();
+    const token = (await readFile(this.tokenFile, "utf8")).trim();
     return fetch(`${this.base}${path}`, {
       method,
       headers: {

@@ -25,6 +25,10 @@ for (const [net, prefix] of [
   ["::1", 128],
   ["fc00::", 7],
   ["fe80::", 10],
+  // Prefixes that embed an IPv4 address: NAT64 and 6to4.
+  ["64:ff9b::", 96],
+  ["64:ff9b:1::", 48],
+  ["2002::", 16],
   ["ff00::", 8],
 ] as const) {
   blocked.addSubnet(net, prefix, "ipv6");
@@ -74,7 +78,11 @@ export class UrlGuard {
       return "Only http and https URLs are allowed";
     if (url.username || url.password)
       return "Credentials in the URL are not allowed; use the credential field";
-    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    // A trailing dot is the same name in DNS; strip it before matching.
+    const host = url.hostname
+      .toLowerCase()
+      .replace(/^\[|\]$/g, "")
+      .replace(/\.$/, "");
     if (this.allow.has(host)) return null;
     if (!host.includes(".") && isIP(host) === 0)
       return "Single-label hostnames resolve inside the cluster and are not allowed";
