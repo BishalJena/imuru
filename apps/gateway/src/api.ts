@@ -260,6 +260,12 @@ export function apiRouter(deps: ApiDeps): Router {
     res.json((await servers.list()).map((row) => servers.view(row, { admin })));
   });
 
+  // Admin-only: aggregates cover every user's calls.
+  r.get("/servers/stats", auth, requireAdmin, async (req, res) => {
+    const hours = Math.min(Math.max(Number(req.query.hours) || 24, 1), 24 * 30);
+    res.json({ hours, servers: await repo.serverStats(hours) });
+  });
+
   r.post("/servers", auth, requireAdmin, async (req, res) => {
     const body = parse(createServer, req, res);
     if (!body) return;

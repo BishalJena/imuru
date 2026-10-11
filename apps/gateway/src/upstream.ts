@@ -156,8 +156,49 @@ function isTimeout(err: unknown): boolean {
   return e?.code === -32001 || /timed? ?out/i.test(String(e?.message ?? ""));
 }
 
-function describe(err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err);
+/**
+ * Why an upstream failed, in words an admin can act on. Node and the SDK
+ * report network failures as "fetch failed" with the real code buried in
+ * err.cause, and HTTP failures inside the message text.
+ */
+export function describe(err: unknown): string {
+  const e = err as { message?: unknown };
+  const msg = String(e?.message ?? err);
+  // Collect codes and messages along the cause chain; Node nests one error per
+  // attempted address in AggregateError.errors.
+  const codes: string[] = [];
+  const causes: string[] = [];
+  const walk = (x: unknown, depth: number): void => {
+    if (!x || typeof x !== "object" || depth > 4) return;
+    const c = x as { code?: unknown; message?: unknown; cause?: unknown; errors?: unknown[] };
+    if (c.code) codes.push(String(c.code));
+    if (depth > 0 && c.message) causes.push(String(c.message));
+    walk(c.cause, depth + 1);
+    c.errors?.forEach((y) => walk(y, depth + 1));
+  };
+  walk(err, 0);
+  const code = codes.join(" ");
+  const status = /HTTP (\d{3})/.exec(msg)?.[1];
+
+  if (msg.includes("blocked by SSRF guard")) return msg.slice(0, 300);
+  if (causes.includes("bad port"))
+    return "Port blocked by the HTTP client (a reserved port such as 9 or 25)";
+  if (/ECONNREFUSED/.test(code + msg))
+    return "Connection refused: nothing is listening at that address";
+  if (/ENOTFOUND|EAI_AGAIN/.test(code + msg))
+    return "DNS lookup failed: the hostname does not resolve";
+  if (/ECONNRESET/.test(code) || /socket hang up|ECONNRESET/.test(msg))
+    return "Connection reset by the upstream";
+  if (/EHOSTUNREACH|ENETUNREACH/.test(code)) return "Network unreachable: no route to the upstream";
+  if (/CERT|certificate|self[- ]signed/i.test(code + msg))
+    return "TLS certificate error: the upstream's certificate is not trusted";
+  if (/redirect/i.test(msg)) return "Upstream answered with a redirect; redirects are refused";
+  if (status === "401" || status === "403")
+    return `Upstream rejected the credential (HTTP ${status})`;
+  if (status === "404") return "MCP endpoint not found (HTTP 404): check the URL path";
+  if (status && status.startsWith("5")) return `Upstream server error (HTTP ${status})`;
+  if (/timed? ?out/i.test(msg) || /UND_ERR_CONNECT_TIMEOUT|ETIMEDOUT/.test(code))
+    return `Timed out: ${msg.slice(0, 200)}`;
   return msg.slice(0, 300);
 }
 

@@ -38,7 +38,7 @@ export interface McpEndpointOptions {
 export function mcpRouter(
   registry: Registry,
   opts: McpEndpointOptions,
-): Router & { notifyAll: () => void } {
+): Router & { notifyAll: () => void; sessionCount: () => number } {
   const sessions = new Map<string, Session>();
   const isAllowed = opts.isAllowed ?? (() => true);
 
@@ -153,10 +153,11 @@ export function mcpRouter(
     await transport.handleRequest(req, res, req.body);
   };
 
-  const router = express.Router() as Router & { notifyAll: () => void };
+  const router = express.Router() as Router & { notifyAll: () => void; sessionCount: () => number };
   router.post("/", route);
   router.get("/", route);
   router.delete("/", route);
   router.notifyAll = notifyAll;
+  router.sessionCount = () => sessions.size;
   return router;
 }

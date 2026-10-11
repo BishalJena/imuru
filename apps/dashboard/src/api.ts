@@ -29,6 +29,17 @@ export interface Server {
   last_error?: string | null;
 }
 
+export interface ServerStats {
+  server_slug: string;
+  calls: number;
+  upstream_errors: number;
+  refused: number;
+  error_rate: number;
+  p50_ms: number | null;
+  p95_ms: number | null;
+  last_call: string;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -125,6 +136,8 @@ export const api = {
     request<{ invite_url: string; expires_at: string }>("POST", "/invites", { email, name, role }),
 
   servers: () => request<Server[]>("GET", "/servers"),
+  serverStats: (hours: number) =>
+    request<{ hours: number; servers: ServerStats[] }>("GET", `/servers/stats?hours=${hours}`),
   createServer: (s: Record<string, unknown>) => request<Server>("POST", "/servers", s),
   updateServer: (id: string, s: Record<string, unknown>) =>
     request<Server>("PATCH", `/servers/${id}`, s),

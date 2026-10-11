@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, type Me, type Server } from "../api.js";
+import { api, type Me, type Server, type ServerStats } from "../api.js";
 import { useLoad } from "../hooks.js";
 
 const STATUS_LABEL = {
@@ -12,6 +12,11 @@ export function ServersPage({ me }: { me: Me }) {
   const { data: servers, error, reload } = useLoad(api.servers, 3000);
   const [editing, setEditing] = useState<Server | "new" | null>(null);
   const isAdmin = me.role === "admin";
+  const { data: stats } = useLoad(
+    () => (isAdmin ? api.serverStats(24) : Promise.resolve({ hours: 24, servers: [] })),
+    10000,
+  );
+  const statsFor = (slug: string) => stats?.servers.find((x) => x.server_slug === slug);
 
   return (
     <section>
@@ -55,6 +60,7 @@ export function ServersPage({ me }: { me: Me }) {
                 {s.managed && " · managed by Helm"} · timeout {(s.timeout_ms ?? 0) / 1000}s
               </div>
             )}
+            {isAdmin && <StatsLine stats={statsFor(s.slug)} />}
             <details>
               <summary>{s.tools.length} tools</summary>
               <ul className="tools">
@@ -226,5 +232,20 @@ function ServerForm({
         </button>
       </div>
     </form>
+  );
+}
+
+function StatsLine({ stats }: { stats: ServerStats | undefined }) {
+  if (!stats) return <div className="muted small">Last 24 h: no calls</div>;
+  const pct = (stats.error_rate * 100).toFixed(
+    stats.error_rate > 0 && stats.error_rate < 0.1 ? 1 : 0,
+  );
+  return (
+    <div className="muted small">
+      Last 24 h: {stats.calls} calls ·{" "}
+      <span className={stats.upstream_errors ? "error" : ""}>{pct}% upstream errors</span>
+      {stats.refused > 0 && ` · ${stats.refused} refused`}
+      {stats.p50_ms !== null && ` · p50 ${stats.p50_ms} ms · p95 ${stats.p95_ms} ms`}
+    </div>
   );
 }

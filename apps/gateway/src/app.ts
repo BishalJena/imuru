@@ -11,6 +11,7 @@ import { mcpAuth, type Principal } from "./auth.js";
 import type { Config } from "./config.js";
 import type { TokenSigner } from "./crypto.js";
 import { mcpRouter } from "./mcp-endpoint.js";
+import { Metrics } from "./metrics.js";
 import type { Registry } from "./registry.js";
 import type { Repo } from "./repo.js";
 import type { ServerService } from "./servers.js";
@@ -53,6 +54,16 @@ export function createApp(deps: AppDeps): Express {
     }
   });
 
+  // The getter is called at scrape time, after mcp is assigned below.
+  const metrics = new Metrics(registry, () => mcp.sessionCount());
+
+  // Not routed by the Ingress (the app host sends "/" to the dashboard) and the
+  // gateway NetworkPolicy admits only Traefik and the provisioner, so this is
+  // reachable through `kubectl port-forward` or an in-cluster scraper you allow.
+  app.get("/metrics", (_req, res) => {
+    res.type("text/plain; version=0.0.4").send(metrics.render());
+  });
+
   const mcp = mcpRouter(registry, {
     sessionIdleMs: config.SESSION_IDLE_MS,
     ...(deps.isAllowed
@@ -61,6 +72,7 @@ export function createApp(deps: AppDeps): Express {
         ? { isAllowed: deps.policies.isAllowed }
         : {}),
     onCall: (e) => {
+      metrics.recordCall(e.server, e.outcome, e.principal.via, e.durationMs);
       void repo
         .audit({
           userId: e.principal.userId,

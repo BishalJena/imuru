@@ -278,4 +278,42 @@ export class Repo {
     );
     return r.rows;
   }
+
+  /**
+   * Per-server call statistics over a recent window, from the audit log.
+   * "Errors" are failures of the upstream (tool error, timeout, unreachable);
+   * calls the gateway refused (denied, unknown tool) are counted separately.
+   */
+  async serverStats(hours: number): Promise<
+    {
+      server_slug: string;
+      calls: number;
+      upstream_errors: number;
+      refused: number;
+      error_rate: number;
+      p50_ms: number | null;
+      p95_ms: number | null;
+      last_call: string;
+    }[]
+  > {
+    const r = await this.db.query(
+      `SELECT server_slug,
+              count(*)::int AS calls,
+              count(*) FILTER (WHERE outcome IN ('tool_error', 'timeout', 'unreachable'))::int AS upstream_errors,
+              count(*) FILTER (WHERE outcome IN ('denied', 'unknown_tool'))::int AS refused,
+              round(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms)
+                FILTER (WHERE outcome IN ('ok', 'tool_error', 'timeout', 'unreachable')))::int AS p50_ms,
+              round(percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms)
+                FILTER (WHERE outcome IN ('ok', 'tool_error', 'timeout', 'unreachable')))::int AS p95_ms,
+              max(ts) AS last_call
+       FROM audit_log
+       WHERE server_slug IS NOT NULL AND ts > now() - make_interval(hours => $1)
+       GROUP BY server_slug ORDER BY server_slug`,
+      [hours],
+    );
+    return r.rows.map((row) => {
+      const reached = row.calls - row.refused;
+      return { ...row, error_rate: reached > 0 ? row.upstream_errors / reached : 0 };
+    });
+  }
 }

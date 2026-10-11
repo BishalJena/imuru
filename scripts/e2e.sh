@@ -209,6 +209,14 @@ retry 3 audit_has create_product denied && ok "audit log: denied call attributed
 api admin DELETE "/policies/$RULE" >/dev/null
 [[ " $(tool_names "$SID") " == *" woo__create_product "* ]] && ok "removing the rule restores the tool" || ko "removing the rule restores the tool"
 
+# Observability: Prometheus metrics inside the cluster only, per-server stats for admins.
+metrics=$(kubectl -n "$PLATFORM_NS" exec deploy/gateway -- node -e "fetch('http://localhost:8080/metrics').then(r=>r.text()).then(t=>process.stdout.write(t))" 2>/dev/null || true)
+[[ "$metrics" == *'urumi_gateway_tool_calls_total{server="woo",outcome="ok",via="mcp"}'* && "$metrics" == *'urumi_gateway_upstream_up{server="woo",status="connected"} 1'* ]] \
+  && ok "/metrics exposes per-server call counters and upstream status" || ko "/metrics exposes call counters"
+[[ "$(curl -s "$APP_URL/metrics")" != *urumi_gateway_* ]] && ok "/metrics is not reachable through the public host" || ko "/metrics is not reachable through the public host"
+[[ "$(api admin GET '/servers/stats?hours=1' | json "[s['calls'] for s in d['servers'] if s['server_slug']=='woo'][0]")" -gt 0 ]] \
+  && ok "per-server stats report woo calls, error rate and latency" || ko "per-server stats for woo"
+
 # Revoke: the next call is rejected, even inside the open session.
 KEY_ID=$(api member GET /keys | json '[k["id"] for k in d if k["revoked_at"] is None][0]')
 api admin DELETE "/users/$(api admin GET /users | json "[u['id'] for u in d if u['email']=='$MEMBER_EMAIL'][0]")/keys/$KEY_ID" >/dev/null

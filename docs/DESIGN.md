@@ -205,6 +205,24 @@ One production detail: WooCommerce verifies OAuth signatures against its home UR
 
 **Scaling the gateway.** It runs one replica because MCP sessions and the in-memory rate limiter live in the process. Running several replicas needs session affinity on `Mcp-Session-Id` at the Ingress, or a shared session store, plus a shared rate limiter. Upstream clients and the tool cache are per replica and need no coordination.
 
+## Observability
+
+- **`/metrics`, Prometheus text format, no extra dependency:**
+  - `urumi_gateway_tool_calls_total{server, outcome, via}`
+  - `urumi_gateway_tool_call_duration_seconds` (histogram per server, 50 ms to 30 s buckets)
+  - `urumi_gateway_upstream_up{server, status}` and `urumi_gateway_upstream_tools{server}`
+  - `urumi_gateway_mcp_sessions`
+  - `urumi_gateway_uptime_seconds`
+
+  The endpoint is not routed by the Ingress, since `/` on the app host goes to the dashboard, and the gateway NetworkPolicy admits only Traefik and the provisioner. Read it with `kubectl port-forward`, or allow a Prometheus scraper's namespace in the policy.
+
+- **Per-server stats** for admins on the Servers page (`GET /api/servers/stats?hours=N`), computed from the audit log so they survive restarts:
+  - calls,
+  - upstream error rate (tool errors, timeouts, unreachable),
+  - calls the gateway refused (denied, unknown tool),
+  - p50/p95 latency.
+- **Failure reasons.** Node reports network failures as "fetch failed" with the real cause nested in `err.cause`, sometimes one error per attempted address. The gateway walks that chain and reports a reason an admin can act on: connection refused, DNS failure, connection reset, TLS certificate error, refused redirect, credential rejected (401/403), wrong path (404), upstream server error (5xx), timeout, or blocked by the SSRF guard. The reason appears on the server card, and failed calls carry their error text in the audit log.
+
 ## Testing
 
 - **Unit and integration tests** (`make check`):

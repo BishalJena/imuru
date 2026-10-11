@@ -205,7 +205,7 @@ Stand-out items from the brief:
 | Security hardening: SSRF guard, default-deny ingress and egress NetworkPolicies everywhere, non-root read-only containers, encrypted upstream credentials, no service-account tokens                                                                                                                                       | `apps/gateway/src/ssrf.ts`, `charts/*/templates/networkpolicy.yaml`, `docs/THREAT_MODEL.md`                          |
 | Upgrades and rollback                                                                                                                                                                                                                                                                                                      | `scripts/upgrade-rollback.sh`, section above                                                                         |
 | **Bonus: multi-store provisioning.** Create/delete from the dashboard, a namespace, database, volumes and host per store, automatic MCP registration, NetworkPolicy isolation, ResourceQuota/LimitRange, max stores per user, safe retries and restarts, least-privilege RBAC plus an admission policy for the provisioner | `apps/provisioner`, `charts/platform/templates/provisioner.yaml`, dashboard **Stores** page, `scripts/e2e-stores.sh` |
-| Clear reporting of why an upstream is unreachable or a call failed                                                                                                                                                                                                                                                         | Servers page `last_error`, audit log outcome and error text                                                          |
+| Observability: Prometheus `/metrics` (tool calls by server, outcome and channel; latency histogram per server; upstream status; open sessions), per-server calls, error rate and p50/p95 latency on the Servers page, and failure reasons in plain words ("Connection refused: nothing is listening at that address")      | `apps/gateway/src/metrics.ts`, `GET /api/servers/stats`, `describe()` in `apps/gateway/src/upstream.ts`              |
 
 ## Development
 
@@ -213,6 +213,7 @@ Stand-out items from the brief:
 make check        # typecheck, lint, format check, unit tests (gateway tests start a throwaway Postgres container)
 make helm-lint
 make e2e          # against the running local cluster
+kubectl -n platform port-forward deploy/gateway 8080:8080   # then: curl localhost:8080/metrics
 ```
 
 Repository layout:
