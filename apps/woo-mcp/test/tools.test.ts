@@ -192,6 +192,24 @@ describe("list_orders", () => {
   });
 });
 
+describe("list_orders input checks", () => {
+  it("rejects a date that does not exist without calling the store", async () => {
+    const before = sent.length;
+    const r = await call("list_orders", { date: "2026-13-40" });
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toMatch(/not a calendar date: 2026-13-40/);
+    expect(sent.length).toBe(before);
+  });
+
+  it("rejects date combined with after or before instead of dropping them", async () => {
+    const before = sent.length;
+    const r = await call("list_orders", { date: "2026-10-11", after: "2026-10-01T00:00:00" });
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toMatch(/either date or after\/before/);
+    expect(sent.length).toBe(before);
+  });
+});
+
 describe("loadConfig", () => {
   it("names every missing or invalid variable", () => {
     expect(() => loadConfig({ WOO_BASE_URL: "not a url", WOO_CONSUMER_KEY: "nope" })).toThrow(

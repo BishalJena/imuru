@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
-import { dayRange, localDate, localIso } from "./dates.js";
+import { dayRange, isCalendarDate, localDate, localIso } from "./dates.js";
 import { WooError, type WooClient } from "./woo.js";
 
 const ORDER_STATUSES = [
@@ -109,6 +109,10 @@ function ok<T extends object>(output: T) {
     content: [{ type: "text" as const, text: JSON.stringify(output) }],
     structuredContent: output,
   };
+}
+
+function inputError(message: string) {
+  return { content: [{ type: "text" as const, text: message }], isError: true };
 }
 
 function fail(err: unknown, notFound?: string) {
@@ -256,6 +260,12 @@ export function registerTools(
       annotations: { readOnlyHint: true },
     },
     async ({ date, after, before, status, page, per_page }) => {
+      // Input errors are reported as such; the generic "unexpected error" text is
+      // for failures we did not anticipate.
+      if (date && (after || before)) {
+        return inputError("Use either date or after/before, not both");
+      }
+      if (date && !isCalendarDate(date)) return inputError(`not a calendar date: ${date}`);
       try {
         const range = date ? dayRange(date) : { after, before };
         // Store info only labels the range: fetched in parallel, and its

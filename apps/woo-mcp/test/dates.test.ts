@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dayRange, localDate, localIso, zoneOf } from "../src/dates.js";
+import { dayRange, isCalendarDate, localDate, localIso, zoneOf } from "../src/dates.js";
 
 describe("store-local dates", () => {
   // 20:00 UTC on Oct 10 is already Oct 11 in India (UTC+05:30).
@@ -35,5 +35,19 @@ describe("store-local dates", () => {
     expect(localDate(t, "UTC+05:30")).toBe("2026-10-11");
     expect(localIso(t, "UTC+05:30")).toBe("2026-10-11T01:30:00+05:30");
     expect(localIso(t, "UTC-04:00")).toBe("2026-10-10T16:00:00-04:00");
+  });
+});
+
+describe("calendar dates", () => {
+  it("accepts real days and rejects impossible ones", () => {
+    expect(isCalendarDate("2026-10-11")).toBe(true);
+    expect(isCalendarDate("2024-02-29")).toBe(true);
+    expect(isCalendarDate("2026-02-29")).toBe(false);
+    expect(isCalendarDate("2026-13-40")).toBe(false);
+    expect(isCalendarDate("2026-1-5")).toBe(false);
+  });
+
+  it("dayRange refuses a date that does not exist", () => {
+    expect(() => dayRange("2026-13-40")).toThrow(/not a calendar date/);
   });
 });
