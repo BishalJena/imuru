@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
@@ -7,6 +8,7 @@ const target = process.env.GATEWAY_URL ?? "http://app.127.0.0.1.nip.io";
 
 export default defineConfig({
   plugins: [react()],
+  test: { environment: "jsdom" },
   server: {
     proxy: {
       "/api": { target, changeOrigin: true },

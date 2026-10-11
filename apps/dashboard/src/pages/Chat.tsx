@@ -47,6 +47,7 @@ export function ChatPage({ me }: { me: Me }) {
 
   const send = async (text: string) => {
     setBusy(true);
+    let answered = false;
     history.current.push({ role: "user", text });
     setItems((xs) => [...xs, { kind: "user", text }]);
     try {
@@ -84,6 +85,7 @@ export function ChatPage({ me }: { me: Me }) {
             ),
           );
         } else if (event === "message") {
+          answered = true;
           history.current.push({ role: "assistant", text: d.text });
           setItems((xs) => [...xs, { kind: "assistant", text: d.text }]);
         } else if (event === "error") {
@@ -93,6 +95,9 @@ export function ChatPage({ me }: { me: Me }) {
     } catch (err) {
       setItems((xs) => [...xs, { kind: "error", text: (err as Error).message }]);
     } finally {
+      // A failed turn is not part of the conversation: the next message must not
+      // follow an unanswered user message.
+      if (!answered) history.current.pop();
       setBusy(false);
     }
   };

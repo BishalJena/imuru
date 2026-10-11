@@ -80,7 +80,13 @@ export function StoresPage({ me }: { me: Me }) {
                 <span className={`badge ${BADGE[s.status]}`}>{LABEL[s.status]}</span>
                 {s.reason && <div className="error small">{s.reason}</div>}
               </td>
-              <td>{s.url && s.status === "ready" ? <a href={s.url}>{s.url}</a> : "-"}</td>
+              <td>
+                {s.url && s.status === "ready" && /^https?:\/\//.test(s.url) ? (
+                  <a href={s.url}>{s.url}</a>
+                ) : (
+                  "-"
+                )}
+              </td>
               <td>{fmtTime(s.created_at)}</td>
               <td className="actions">
                 {/* Creating is idempotent per owner, so only the owner can retry. */}

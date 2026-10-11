@@ -34,6 +34,7 @@ export function KeysPage() {
         className="inline"
         onSubmit={async (e) => {
           e.preventDefault();
+          setError(undefined);
           try {
             setCreated((await api.createKey(name)).key);
             setName("");
@@ -113,11 +114,14 @@ export function KeyTable({
               {!k.revoked_at && (
                 <button
                   className="danger small"
-                  onClick={() =>
+                  onClick={() => {
+                    // Revocation cannot be undone, and the client using this key stops working.
+                    if (!window.confirm(`Revoke "${k.name}"? Clients using it will stop working.`))
+                      return;
                     void onRevoke(k.id).catch((err: unknown) =>
                       window.alert((err as Error).message),
-                    )
-                  }
+                    );
+                  }}
                 >
                   Revoke
                 </button>

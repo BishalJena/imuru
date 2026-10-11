@@ -91,16 +91,18 @@ export function ServersPage({ me }: { me: Me }) {
                 >
                   {s.enabled ? "Disable" : "Enable"}
                 </button>
-                <button
-                  className="danger"
-                  onClick={() => {
-                    if (!window.confirm(`Remove ${s.name}? Its tools disappear for everyone.`))
-                      return;
-                    void run(async () => (await api.deleteServer(s.id), reload()));
-                  }}
-                >
-                  Remove
-                </button>
+                {!s.managed && (
+                  <button
+                    className="danger"
+                    onClick={() => {
+                      if (!window.confirm(`Remove ${s.name}? Its tools disappear for everyone.`))
+                        return;
+                      void run(async () => (await api.deleteServer(s.id), reload()));
+                    }}
+                  >
+                    Remove
+                  </button>
+                )}
               </div>
             )}
           </article>
