@@ -13,7 +13,7 @@ DASHBOARD_TAG := $(call src_hash,apps/dashboard)
 PROVISIONER_TAG := $(call src_hash,apps/provisioner charts/store)
 EVERYTHING_TAG := 2026.8.31
 
-.PHONY: vps-setup vps-images vps-tunnel help install typecheck lint test check cluster-up cluster-down deploy-store deploy-upstreams deploy-platform deploy-local push deploy-prod helm-lint e2e images
+.PHONY: chart-test vps-setup vps-images vps-tunnel help install typecheck lint test check cluster-up cluster-down deploy-store deploy-upstreams deploy-platform deploy-local push deploy-prod helm-lint e2e images
 
 help:
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -31,7 +31,10 @@ lint: ## Lint and format check
 test: ## Run unit tests
 	pnpm test
 
-check: typecheck lint test ## Typecheck, lint and test
+chart-test: ## Render-based chart tests (no cluster needed)
+	scripts/chart-tests.sh
+
+check: typecheck lint test chart-test ## Typecheck, lint, unit and chart tests
 
 cluster-up: ## Create the local k3d cluster (idempotent)
 	@k3d cluster list $(CLUSTER) >/dev/null 2>&1 || k3d cluster create --config $(K3D_CONFIG)

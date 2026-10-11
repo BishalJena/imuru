@@ -121,13 +121,39 @@ spec:
             matchLabels: {{- include "platform.selectorLabels" (dict "ctx" $ "component" "gateway") | nindent 14 }}
       ports:
         - port: http
-    # The Kubernetes API server (Service port 443, served on the node at 6443).
+    # The Kubernetes API server: the kubernetes Service (443) is translated to
+    # the node address on 6443 before policy applies, and that address is public
+    # on many VPS hosts, so 6443 is allowed to any destination.
+    - ports:
+        - port: 6443
     - to:
         {{- range $np.privateCidrs }}
         - ipBlock: { cidr: {{ . }} }
         {{- end }}
       ports:
         - port: 443
-        - port: 6443
+{{- end }}
+{{- if .Values.global.tls.enabled }}
+---
+# cert-manager answers Let's Encrypt HTTP-01 challenges from a solver pod it
+# creates next to the Ingress; default-deny would drop Traefik's requests to it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: acme-http01-solver
+spec:
+  podSelector:
+    matchLabels:
+      acme.cert-manager.io/http01-solver: "true"
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $np.ingressController.namespace }}
+          podSelector:
+            matchLabels: {{- toYaml $np.ingressController.podLabels | nindent 14 }}
+      ports:
+        - port: 8089
 {{- end }}
 {{- end }}

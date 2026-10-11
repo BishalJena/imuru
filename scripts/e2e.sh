@@ -96,7 +96,16 @@ retry 3 check_cod_order && ok "COD checkout creates order #${E2E_ORDER} visible 
   || ko "COD checkout creates an order visible to admin API"
 
 COOKIES=$(mktemp -d)
-trap 'rm -rf "$COOKIES"' EXIT
+# Restores shared state if the script stops half way: a server left disabled or
+# a deny rule left in place would break later runs and the live demo.
+EB=""
+RULE=""
+cleanup() {
+  [[ -n "$EB" ]] && api admin PATCH "/servers/$EB" '{"enabled":true}' >/dev/null 2>&1
+  [[ -n "$RULE" ]] && api admin DELETE "/policies/$RULE" >/dev/null 2>&1
+  rm -rf "$COOKIES"
+}
+trap cleanup EXIT
 ADMIN_EMAIL=$(helm get values platform -n "$PLATFORM_NS" --all -o json | json 'd["admin"]["email"]')
 ADMIN_PASSWORD=$(kubectl -n "$PLATFORM_NS" get secret gateway -o jsonpath='{.data.admin-password}' | base64 -d)
 MEMBER_EMAIL="${MEMBER_EMAIL:-user-b@e2e.test}"
@@ -175,7 +184,9 @@ names=$(tool_names "$SID" 2>/dev/null || true)
 check_orders_today() {
   local today
   today=$(call_tool "$SID" woo__get_store_info "{}" | json 'd["result"]["structuredContent"]["today"]') || return 1
-  call_tool "$SID" woo__list_orders "{\"date\":\"$today\"}" | json '[o["id"] for o in d["result"]["structuredContent"]["items"]]' | grep -q "${E2E_ORDER:-}"
+  [[ -n "${E2E_ORDER:-}" ]] || return 1
+  call_tool "$SID" woo__list_orders "{\"date\":\"$today\"}" |
+    json "$E2E_ORDER in [o['id'] for o in d['result']['structuredContent']['items']]" | grep -qx True
 }
 retry 5 check_orders_today && ok "user B: woo__list_orders(today) returns order #${E2E_ORDER:-?}" || ko "user B: orders today returns the e2e order"
 [[ "$(call_tool "$SID" everything-a__echo '{"message":"hi"}' | json 'd["result"]["content"][0]["text"]')" == *hi* ]] \
@@ -184,10 +195,11 @@ retry 5 check_orders_today && ok "user B: woo__list_orders(today) returns order 
 # Disable: tools disappear from the list and direct calls are rejected.
 EB=$(server_id everything-b)
 api admin PATCH "/servers/$EB" '{"enabled":false}' >/dev/null
-names=$(tool_names "$SID")
+names=$(tool_names "$SID" || true)
 [[ " $names " != *" everything-b__"* && " $names " == *" everything-a__echo "* ]] && ok "disabled server's tools disappear from tools/list" || ko "disabled server's tools disappear"
 [[ "$(call_tool "$SID" everything-b__echo '{"message":"x"}' | json 'd["result"]["isError"]')" == True ]] && ok "call to a disabled server is rejected" || ko "call to a disabled server is rejected"
 api admin PATCH "/servers/$EB" '{"enabled":true}' >/dev/null
+EB=""
 retry 10 eval "[[ \$(server_status everything-b) == connected ]]" && ok "re-enabled server reconnects" || ko "re-enabled server reconnects"
 
 # Kill an upstream pod: the others keep working and it shows as unreachable.
@@ -202,13 +214,14 @@ retry 3 audit_has list_orders ok && ok "audit log: user B, woo list_orders, ok" 
 retry 3 audit_has echo unknown_tool && ok "audit log: rejected call to the disabled server" || ko "audit log records the rejected call"
 
 # Tool permissions (opt-in): deny a write tool for members, then remove the rule.
-RULE=$(api admin POST /policies '{"role":"member","server_slug":"woo","tool_pattern":"create_product"}' | json 'd["id"]')
-names=$(tool_names "$SID")
+RULE=$(api admin POST /policies '{"role":"member","server_slug":"woo","tool_pattern":"create_product"}' | json 'd["id"]' || true)
+names=$(tool_names "$SID" || true)
 [[ " $names " != *" woo__create_product "* && " $names " == *" woo__list_orders "* ]] && ok "policy hides woo__create_product from members" || ko "policy hides woo__create_product from members"
 [[ "$(call_tool "$SID" woo__create_product '{"name":"x","regular_price":"1"}' | json 'd["result"]["content"][0]["text"]')" == "Not permitted" ]] \
   && ok "direct call to a denied tool is rejected" || ko "direct call to a denied tool is rejected"
 retry 3 audit_has create_product denied && ok "audit log: denied call attributed to user B" || ko "audit log records the denied call"
 api admin DELETE "/policies/$RULE" >/dev/null
+RULE=""
 [[ " $(tool_names "$SID") " == *" woo__create_product "* ]] && ok "removing the rule restores the tool" || ko "removing the rule restores the tool"
 
 # Observability: Prometheus metrics inside the cluster only, per-server stats for admins.
@@ -220,7 +233,9 @@ metrics=$(kubectl -n "$PLATFORM_NS" exec deploy/gateway -- node -e "fetch('http:
   && ok "per-server stats report woo calls, error rate and latency" || ko "per-server stats for woo"
 
 # Revoke: the next call is rejected, even inside the open session.
-KEY_ID=$(api member GET /keys | json '[k["id"] for k in d if k["revoked_at"] is None][0]')
+# The key under test is urk_<key_id>_<secret>; revoke that one, not "the first active".
+KEY_KID=$(cut -d_ -f2 <<<"$KEY")
+KEY_ID=$(api member GET /keys | json "[k['id'] for k in d if k['key_id'] == '$KEY_KID'][0]" || true)
 api admin DELETE "/users/$(api admin GET /users | json "[u['id'] for u in d if u['email']=='$MEMBER_EMAIL'][0]")/keys/$KEY_ID" >/dev/null
 status=$(curl -s -o /dev/null -w '%{http_code}' "$APP_URL/mcp" -H "Authorization: Bearer $KEY" -H "Mcp-Session-Id: $SID" \
   -H 'MCP-Protocol-Version: 2025-06-18' -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \

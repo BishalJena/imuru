@@ -111,7 +111,14 @@ export function KeyTable({
             <td>{k.revoked_at ? `revoked ${fmtTime(k.revoked_at)}` : "active"}</td>
             <td>
               {!k.revoked_at && (
-                <button className="danger small" onClick={() => void onRevoke(k.id)}>
+                <button
+                  className="danger small"
+                  onClick={() =>
+                    void onRevoke(k.id).catch((err: unknown) =>
+                      window.alert((err as Error).message),
+                    )
+                  }
+                >
                   Revoke
                 </button>
               )}

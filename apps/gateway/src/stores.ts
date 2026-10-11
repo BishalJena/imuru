@@ -15,7 +15,8 @@ export interface StoreRow {
   updated_at: string;
 }
 
-export const STORE_SLUG = /^[a-z][a-z0-9-]{1,19}$/;
+/** 2-20 chars; prefixed with "store-" it must still be a DNS label (no trailing dash). */
+export const STORE_SLUG = /^[a-z][a-z0-9-]{0,18}[a-z0-9]$/;
 /** Server slug under which a store's MCP server is registered. */
 export const storeServerSlug = (slug: string) => `store-${slug}`;
 

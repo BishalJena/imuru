@@ -51,14 +51,24 @@ wp option update woocommerce_cod_settings --format=json \
 wp wc tool run install_pages --user="$ADMIN_USER" >/dev/null
 log "store pages ensured"
 
+# Products from values are reconciled by SKU: created when missing, name and
+# price updated when they differ, so upgrades and rollbacks reach them too.
+# wp reads from /dev/null so it cannot consume the loop's input.
 while IFS='|' read -r sku price name; do
   [ -n "$sku" ] || continue
-  if [ "$(wp wc product list --sku="$sku" --user="$ADMIN_USER" --format=count)" -gt 0 ]; then
-    log "product $sku exists"
-  else
+  current=$(wp wc product list --sku="$sku" --user="$ADMIN_USER" --fields=id,name,regular_price --format=csv </dev/null | tail -n +2 | head -1)
+  if [ -z "$current" ]; then
     wp wc product create --user="$ADMIN_USER" --name="$name" --sku="$sku" \
-      --regular_price="$price" --status=publish >/dev/null
+      --regular_price="$price" --status=publish </dev/null >/dev/null
     log "product $sku created"
+    continue
+  fi
+  id=${current%%,*}
+  if [ "$current" = "$id,$name,$price" ] || [ "$current" = "$id,\"$name\",$price" ]; then
+    log "product $sku up to date"
+  else
+    wp wc product update "$id" --user="$ADMIN_USER" --name="$name" --regular_price="$price" </dev/null >/dev/null
+    log "product $sku updated"
   fi
 done < /bootstrap/products.txt
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api, type Me } from "../api.js";
-import { fmtTime, useLoad } from "../hooks.js";
+import { fmtTime, useAction, useLoad } from "../hooks.js";
 
 const BADGE = {
   provisioning: "disabled",
@@ -17,6 +17,7 @@ const LABEL = {
 
 export function StoresPage({ me }: { me: Me }) {
   const { data: stores, error, reload } = useLoad(api.stores, 3000);
+  const { run, actionError } = useAction();
   const [slug, setSlug] = useState("");
   const [formError, setFormError] = useState<string>();
 
@@ -48,12 +49,14 @@ export function StoresPage({ me }: { me: Me }) {
           placeholder="store name, e.g. north"
           value={slug}
           onChange={(e) => setSlug(e.target.value)}
-          pattern="[a-z][a-z0-9-]{1,19}"
+          pattern="[a-z][a-z0-9-]{0,18}[a-z0-9]"
           required
         />
         <button>Create store</button>
       </form>
-      {(formError || error) && <p className="error">{formError ?? error}</p>}
+      {(formError || error || actionError) && (
+        <p className="error">{formError ?? actionError ?? error}</p>
+      )}
       <table>
         <thead>
           <tr>
@@ -80,10 +83,11 @@ export function StoresPage({ me }: { me: Me }) {
               <td>{s.url && s.status === "ready" ? <a href={s.url}>{s.url}</a> : "-"}</td>
               <td>{fmtTime(s.created_at)}</td>
               <td className="actions">
-                {s.status === "failed" && (
+                {/* Creating is idempotent per owner, so only the owner can retry. */}
+                {s.status === "failed" && s.owner_email === me.email && (
                   <button
                     className="secondary small"
-                    onClick={async () => (await api.createStore(s.slug), reload())}
+                    onClick={() => void run(async () => (await api.createStore(s.slug), reload()))}
                   >
                     Retry
                   </button>
@@ -91,15 +95,14 @@ export function StoresPage({ me }: { me: Me }) {
                 {s.desired === "present" && (
                   <button
                     className="danger small"
-                    onClick={async () => {
+                    onClick={() => {
                       if (
                         !window.confirm(
                           `Delete store ${s.slug}? Its database, files and MCP tools are removed.`,
                         )
                       )
                         return;
-                      await api.deleteStore(s.id);
-                      await reload();
+                      void run(async () => (await api.deleteStore(s.id), reload()));
                     }}
                   >
                     Delete

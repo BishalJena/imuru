@@ -55,7 +55,8 @@ describe("stores API", () => {
 
   it("validates slugs", async () => {
     const asAdmin = await gw.login(ADMIN.email, ADMIN.password);
-    for (const slug of ["A", "x", "has space", "a--b", "a".repeat(25)]) {
+    // Must be a valid DNS label once prefixed: no trailing dash (C6).
+    for (const slug of ["A", "x", "has space", "a--b", "a".repeat(25), "shop-", "-shop"]) {
       expect(
         (await asAdmin("/api/stores", { method: "POST", body: JSON.stringify({ slug }) })).status,
       ).toBe(400);

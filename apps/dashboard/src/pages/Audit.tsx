@@ -18,7 +18,10 @@ export function AuditPage({ me }: { me: Me }) {
   const query: Record<string, string> = { limit: "200" };
   if (filter.server) query.server = filter.server;
   if (filter.outcome) query.outcome = filter.outcome;
-  const { data: rows, error } = useLoad(() => api.audit(query), 3000);
+  const { data: rows, error } = useLoad(() => api.audit(query), 3000, [
+    filter.server,
+    filter.outcome,
+  ]);
 
   return (
     <section>

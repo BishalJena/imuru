@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { api, type Role } from "../api.js";
-import { fmtTime, useLoad } from "../hooks.js";
+import { fmtTime, useAction, useLoad } from "../hooks.js";
 
 export function PermissionsPage() {
   const { data: rules, reload } = useLoad(api.policies);
+  const { run, actionError } = useAction();
   const { data: servers } = useLoad(api.servers);
   const [form, setForm] = useState({ role: "member" as Role, server_slug: "", tool_pattern: "" });
   const [error, setError] = useState<string>();
@@ -68,7 +69,7 @@ export function PermissionsPage() {
         </datalist>
         <button>Add rule</button>
       </form>
-      {error && <p className="error">{error}</p>}
+      {(error || actionError) && <p className="error">{error ?? actionError}</p>}
       <table>
         <thead>
           <tr>
@@ -89,7 +90,7 @@ export function PermissionsPage() {
               <td>
                 <button
                   className="danger small"
-                  onClick={async () => (await api.removePolicy(r.id), reload())}
+                  onClick={() => void run(async () => (await api.removePolicy(r.id), reload()))}
                 >
                   Remove
                 </button>

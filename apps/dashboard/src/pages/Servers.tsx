@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api, type Me, type Server, type ServerStats } from "../api.js";
-import { useLoad } from "../hooks.js";
+import { useAction, useLoad } from "../hooks.js";
 
 const STATUS_LABEL = {
   connected: "Connected",
@@ -10,6 +10,7 @@ const STATUS_LABEL = {
 
 export function ServersPage({ me }: { me: Me }) {
   const { data: servers, error, reload } = useLoad(api.servers, 3000);
+  const { run, actionError } = useAction();
   const [editing, setEditing] = useState<Server | "new" | null>(null);
   const isAdmin = me.role === "admin";
   const { data: stats } = useLoad(
@@ -28,7 +29,7 @@ export function ServersPage({ me }: { me: Me }) {
         Every enabled server's tools are available through one gateway endpoint as{" "}
         <code>&lt;server&gt;__&lt;tool&gt;</code>.
       </p>
-      {error && <p className="error">{error}</p>}
+      {(error || actionError) && <p className="error">{actionError ?? error}</p>}
       {editing && (
         <ServerForm
           server={editing === "new" ? null : editing}
@@ -81,20 +82,21 @@ export function ServersPage({ me }: { me: Me }) {
                 </button>
                 <button
                   className="secondary"
-                  onClick={async () => {
-                    await api.updateServer(s.id, { enabled: !s.enabled });
-                    await reload();
-                  }}
+                  onClick={() =>
+                    void run(async () => {
+                      await api.updateServer(s.id, { enabled: !s.enabled });
+                      await reload();
+                    })
+                  }
                 >
                   {s.enabled ? "Disable" : "Enable"}
                 </button>
                 <button
                   className="danger"
-                  onClick={async () => {
+                  onClick={() => {
                     if (!window.confirm(`Remove ${s.name}? Its tools disappear for everyone.`))
                       return;
-                    await api.deleteServer(s.id);
-                    await reload();
+                    void run(async () => (await api.deleteServer(s.id), reload()));
                   }}
                 >
                   Remove

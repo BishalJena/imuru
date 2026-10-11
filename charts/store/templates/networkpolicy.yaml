@@ -125,4 +125,27 @@ spec:
       ports:
         - port: http
 {{- end }}
+{{- if .Values.global.tls.enabled }}
+---
+# cert-manager answers Let's Encrypt HTTP-01 challenges from a solver pod it
+# creates next to the Ingress; default-deny would drop Traefik's requests to it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: acme-http01-solver
+spec:
+  podSelector:
+    matchLabels:
+      acme.cert-manager.io/http01-solver: "true"
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $np.ingressController.namespace }}
+          podSelector:
+            matchLabels: {{- toYaml $np.ingressController.podLabels | nindent 14 }}
+      ports:
+        - port: 8089
+{{- end }}
 {{- end }}

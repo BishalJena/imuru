@@ -67,6 +67,10 @@ rules:
   - apiGroups: [networking.k8s.io]
     resources: [ingresses, networkpolicies]
     verbs: [get, list, watch, create, update, patch, delete]
+  # The HTTP-to-HTTPS redirect Middleware rendered when TLS is on.
+  - apiGroups: [traefik.io]
+    resources: [middlewares]
+    verbs: [get, list, watch, create, update, patch, delete]
 ---
 # Defence in depth on top of RBAC: whatever the provisioner's role allows, its
 # namespace and RoleBinding writes must target store-* namespaces, carry the
