@@ -2,7 +2,7 @@
 
 A WooCommerce store, a purpose-built WooCommerce MCP server, and a team MCP gateway with a dashboard and chat agent, all deployed on Kubernetes with Helm. An admin registers upstream MCP servers once. Every team member then reaches all enabled servers through a single MCP endpoint with a personal API key, or through the chat agent in the dashboard. Upstream credentials never leave the gateway.
 
-The same charts run on local k3d and on a k3s VPS. The only differences are in the values files.
+The same charts run on local k3d and deploy to a k3s VPS. The only differences are in the values files.
 
 ## Architecture
 
@@ -148,7 +148,7 @@ Example: add GitHub's remote MCP server with URL `https://api.githubcopilot.com/
 
 ## Production-like setup (k3s VPS)
 
-The same charts deploy to a single k3s node, with values changes only. `values-prod.yaml` is sized for a small ARM VM: 1 core and 6 GB, for example Oracle Cloud's Always Free `VM.Standard.A1.Flex`. Open TCP 22, 80 and 443 in the cloud firewall. The Kubernetes API stays private and is reached through an SSH tunnel.
+The same charts deploy to a single k3s node, with values changes only. The production values were verified end to end on the local k3s with TLS from cert-manager: certificates issued, HTTP redirected to HTTPS, `Secure` cookies, and WooCommerce calls through woo-mcp behind TLS termination. They have not been deployed to a public VM. `values-prod.yaml` is sized for a small ARM VM: 1 core and 6 GB, for example Oracle Cloud's Always Free `VM.Standard.A1.Flex`. Open TCP 22, 80 and 443 in the cloud firewall. The Kubernetes API stays private and is reached through an SSH tunnel.
 
 1. **Prepare the VM** from your machine. This fixes the host firewall, installs k3s (same version as local) and cert-manager, and writes a kubeconfig:
    ```bash
@@ -203,7 +203,6 @@ Stand-out items from the brief:
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | Tool permissions per role: hidden from the tool list, rejected and audited when called directly                                                                                                                                                                                                                            | `apps/gateway/src/policies.ts`, dashboard **Permissions** page                                                       |
 | Security hardening: SSRF guard, default-deny ingress and egress NetworkPolicies everywhere, non-root read-only containers, encrypted upstream credentials, no service-account tokens                                                                                                                                       | `apps/gateway/src/ssrf.ts`, `charts/*/templates/networkpolicy.yaml`, `docs/THREAT_MODEL.md`                          |
-| Production-like VPS deployment with TLS                                                                                                                                                                                                                                                                                    | `values-prod.yaml`, `scripts/vps/`, `make push` / `make deploy-prod`                                                 |
 | Upgrades and rollback                                                                                                                                                                                                                                                                                                      | `scripts/upgrade-rollback.sh`, section above                                                                         |
 | **Bonus: multi-store provisioning.** Create/delete from the dashboard, a namespace, database, volumes and host per store, automatic MCP registration, NetworkPolicy isolation, ResourceQuota/LimitRange, max stores per user, safe retries and restarts, least-privilege RBAC plus an admission policy for the provisioner | `apps/provisioner`, `charts/platform/templates/provisioner.yaml`, dashboard **Stores** page, `scripts/e2e-stores.sh` |
 | Clear reporting of why an upstream is unreachable or a call failed                                                                                                                                                                                                                                                         | Servers page `last_error`, audit log outcome and error text                                                          |
