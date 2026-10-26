@@ -1,0 +1,31 @@
+// One tool call from an external MCP client. Render as: sequence-diagram
+typeface clean
+autoNumber on
+
+Client [icon: terminal, color: gray, label: "MCP client"]
+Traefik [icon: traefik, color: blue]
+Gateway [icon: node, color: purple]
+Postgres [icon: postgres, color: purple]
+WooMcp [icon: node, color: green, label: "woo-mcp"]
+Woo [icon: woocommerce, color: green, label: "WooCommerce"]
+
+Client > Traefik: tools/call woo__list_orders, with the user's API key
+Traefik > Gateway: forward /mcp
+activate Gateway
+Gateway > Postgres: look up the key: hash matches, not revoked, user active
+Gateway > Gateway: split the name into server "woo" and tool "list_orders", check role policy
+alt [label: woo-mcp answers in time, color: green] {
+  Gateway > WooMcp: tools/call list_orders, with the gateway's own token for woo-mcp
+  activate WooMcp
+  WooMcp > Woo: GET /wp-json/wc/v3/orders, OAuth 1.0a signature (secret never sent)
+  Woo --> WooMcp: orders
+  WooMcp --> Gateway: tool result
+  deactivate WooMcp
+}
+else [label: timeout or unreachable, color: red] {
+  Gateway > Gateway: build a clear error, e.g. "WooCommerce did not respond within 30s"
+}
+Gateway > Postgres: write the audit row: user, server, tool, duration, outcome
+Gateway --> Traefik: result
+deactivate Gateway
+Traefik --> Client: result

@@ -1,0 +1,28 @@
+// Creating and deleting a store from the dashboard. Render as: sequence-diagram
+typeface clean
+
+User [icon: user, color: gray, label: "User (dashboard)"]
+Gateway [icon: node, color: purple]
+Provisioner [icon: helm, color: purple]
+Kube [icon: k8s-api, color: blue, label: "Kubernetes API"]
+NewStore [icon: woocommerce, color: green, label: "namespace store-north"]
+
+User > Gateway: create store "north"
+Gateway > Gateway: record desired state = present, status = Provisioning
+loop [label: every 5 seconds, color: blue] {
+  Provisioner > Gateway: which stores need work?
+}
+Provisioner > Kube: create namespace, RoleBinding, quota
+Provisioner > Kube: helm upgrade --install, wait with a timeout
+Kube > NewStore: WordPress, MariaDB, bootstrap Job, woo-mcp
+Provisioner > Kube: read the new woo-mcp token
+Provisioner > Gateway: register server store-north
+Gateway > NewStore: connect over MCP
+Provisioner > Gateway: report Ready
+Gateway --> User: store-north__* tools appear for everyone
+
+User > Gateway: delete store "north" (desired state = absent)
+Provisioner > Gateway: remove server store-north, so its tools vanish first
+Provisioner > Kube: helm uninstall, delete the namespace
+Kube > NewStore: volumes, Secrets and RoleBinding removed
+Provisioner > Gateway: purge the record once the namespace is gone

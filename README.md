@@ -1,122 +1,115 @@
 # WooCommerce Hosting with a Team MCP Gateway on Kubernetes
 
-A WooCommerce store, a purpose-built WooCommerce MCP server, and a team MCP gateway with a dashboard and chat agent, all deployed on Kubernetes with Helm. An admin registers upstream MCP servers once. Every team member then reaches all enabled servers through a single MCP endpoint with a personal API key, or through the chat agent in the dashboard. Upstream credentials never leave the gateway.
+A WooCommerce store on Kubernetes, an MCP server for that store, and a gateway that turns every MCP server an admin connects into one endpoint for the whole team.
 
-The same charts run on local k3d and deploy to a k3s VPS. The only differences are in the values files.
+An admin registers MCP servers once, in a dashboard. Each team member then gets one URL and a personal API key. That pair works in Claude Code, Cursor or any other MCP client, and the chat agent in the dashboard uses the same tools. Upstream credentials stay inside the gateway: browsers, MCP clients and the LLM never see them.
 
-## Deliverables
-
-Every item from the brief, in the brief's order, with a direct link.
-
-| Deliverable                                                          | Where                                                                                                                                                                                                                                                                                   |
-| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Local setup instructions                                             | [Local setup](#local-setup)                                                                                                                                                                                                                                                             |
-| VPS or production-like setup (k3s)                                   | [Production-like setup](#production-like-setup-k3s-vps)                                                                                                                                                                                                                                 |
-| Place an order                                                       | [Place an order](#place-an-order)                                                                                                                                                                                                                                                       |
-| Connect an external MCP client                                       | [Connect an external MCP client](#connect-an-external-mcp-client)                                                                                                                                                                                                                       |
-| Use the chat agent                                                   | [Use the chat agent](#use-the-chat-agent)                                                                                                                                                                                                                                               |
-| Source: dashboard                                                    | [`apps/dashboard`](apps/dashboard) (React + Vite; pages in [`src/pages`](apps/dashboard/src/pages))                                                                                                                                                                                     |
-| Source: backend and gateway                                          | [`apps/gateway`](apps/gateway): REST API [`api.ts`](apps/gateway/src/api.ts), aggregated MCP endpoint [`mcp-endpoint.ts`](apps/gateway/src/mcp-endpoint.ts), upstream registry and routing [`registry.ts`](apps/gateway/src/registry.ts), [`upstream.ts`](apps/gateway/src/upstream.ts) |
-| Source: WooCommerce MCP server                                       | [`apps/woo-mcp`](apps/woo-mcp): tools in [`tools.ts`](apps/woo-mcp/src/tools.ts)                                                                                                                                                                                                        |
-| Source: chat agent                                                   | [`apps/gateway/src/agent.ts`](apps/gateway/src/agent.ts) (agent loop), [`llm.ts`](apps/gateway/src/llm.ts) (providers), [`chat-route.ts`](apps/gateway/src/chat-route.ts) (streaming endpoint)                                                                                          |
-| Helm charts                                                          | [`charts/store`](charts/store), [`charts/platform`](charts/platform), [`charts/demo-upstreams`](charts/demo-upstreams)                                                                                                                                                                  |
-| Values files, local and production                                   | `values-local.yaml` and `values-prod.yaml` in each chart, e.g. [platform local](charts/platform/values-local.yaml), [platform prod](charts/platform/values-prod.yaml); differences in [What changes for production](docs/DESIGN.md#what-changes-for-production)                         |
-| System design and tradeoffs                                          | [`docs/DESIGN.md`](docs/DESIGN.md)                                                                                                                                                                                                                                                      |
-| ↳ Architecture choices                                               | [Architecture choices](docs/DESIGN.md#architecture-choices)                                                                                                                                                                                                                             |
-| ↳ Tool aggregation, routing, failure handling                        | [Gateway: aggregation, routing and failure handling](docs/DESIGN.md#gateway-aggregation-routing-and-failure-handling), [Request flow](docs/DESIGN.md#request-flow), [What holds under failure](docs/DESIGN.md#what-holds-under-failure)                                                 |
-| ↳ What changes for production (DNS, ingress, storage class, secrets) | [What changes for production](docs/DESIGN.md#what-changes-for-production)                                                                                                                                                                                                               |
-| Threat model                                                         | [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md)                                                                                                                                                                                                                                          |
-| ↳ Shared upstream credentials                                        | [What a member can do with a credential they never see](docs/THREAT_MODEL.md#shared-upstream-credentials-what-a-member-can-do-with-a-credential-they-never-see)                                                                                                                         |
-| ↳ No token passthrough                                               | [Why client tokens are not passed through](docs/THREAT_MODEL.md#why-client-tokens-are-not-passed-through-to-upstream-servers)                                                                                                                                                           |
-| ↳ Untrusted upstreams, manipulative tool descriptions                | [Untrusted upstreams](docs/THREAT_MODEL.md#untrusted-upstreams-tool-descriptions-written-to-manipulate-the-model)                                                                                                                                                                       |
-| ↳ What one team member can do to another                             | [What one team member can do to another](docs/THREAT_MODEL.md#what-one-team-member-can-do-to-another)                                                                                                                                                                                   |
-| Bonus and stand-out items                                            | [Bonus and stand-out items](#bonus-and-stand-out-items): multi-store provisioning (bonus), tool permissions, security hardening, upgrades and rollback, observability                                                                                                                   |
-
-## Architecture
+Everything runs in Kubernetes and is installed with Helm. The same charts run on a laptop (k3d) and on a VPS (k3s). Only the values files differ.
 
 ```mermaid
 flowchart LR
-  B[Dashboard users] -->|app host /| T[Traefik Ingress]
-  C[MCP clients] -->|app host /mcp + API key| T
-  S[Shoppers] -->|store host| T
-  T --> D[dashboard]
-  T --> G[gateway]
-  T --> W[WordPress + WooCommerce]
-  G --> P[(Postgres)]
-  G -->|MCP + bearer| WM[woo-mcp]
-  G -->|MCP| E[everything]
-  G -->|MCP + token| GH[GitHub remote MCP, optional]
-  G -->|function calling| L[LLM: Gemini or OpenAI-compatible]
-  WM -->|REST API, OAuth 1.0a| W --> M[(MariaDB)]
+  subgraph people [People]
+    team["Team<br/>dashboard and chat"]
+    client["MCP clients<br/>Claude Code, Cursor"]
+    shopper["Shoppers"]
+  end
+  subgraph k8s ["Kubernetes: same Helm charts locally and on a VPS"]
+    gw["Gateway<br/>one MCP endpoint, keys, roles, audit log"]
+    woo["woo-mcp<br/>products and orders as tools"]
+    store["WooCommerce store"]
+  end
+  others["Other MCP servers"]
+  llm["LLM for the chat agent"]
+
+  team -->|log in| gw
+  client -->|"one URL + personal API key"| gw
+  shopper -->|shop and check out| store
+  gw -->|"gateway's own credential"| woo
+  woo -->|REST API| store
+  gw -->|"gateway's own credentials"| others
+  gw -->|tool calling| llm
 ```
 
-| Namespace        | Component           | Responsibility                                                                                                                                        |
-| ---------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `store`          | WordPress + MariaDB | The shop. Database and `wp-content` on PVCs. A bootstrap Job installs WooCommerce, enables Cash on Delivery and seeds products.                       |
-| `store`          | `woo-mcp`           | MCP server (Streamable HTTP) exposing products and orders as tools. ClusterIP only, reachable only from the gateway.                                  |
-| `platform`       | `gateway`           | Dashboard API, upstream registry, aggregated `/mcp` endpoint, audit log, tool permissions, chat agent.                                                |
-| `platform`       | `dashboard`         | React SPA served by nginx.                                                                                                                            |
-| `platform`       | Postgres            | Users, API keys, servers (encrypted credentials), audit log.                                                                                          |
-| `demo-upstreams` | `everything`        | The MCP reference server, registered twice to demonstrate tool-name collisions.                                                                       |
-| `platform`       | `provisioner`       | Creates and deletes additional stores from the dashboard (Helm releases in `store-<name>` namespaces). The only component with Kubernetes API access. |
+## The parts
 
-Design and tradeoffs: [`docs/DESIGN.md`](docs/DESIGN.md), including [what holds under failure](docs/DESIGN.md#what-holds-under-failure) and the test that proves each guarantee. Threat model: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
+- **Store.** WordPress with WooCommerce, backed by MariaDB. Products, orders and uploads live on persistent volumes. A setup Job installs WooCommerce, turns on Cash on Delivery and adds sample products.
+- **woo-mcp.** The MCP server for the store, written for this project. It exposes products and orders as tools: list and create products, list and fetch orders, change an order's status, and read store info. It calls WooCommerce's REST API, and only the gateway can reach it.
+- **Gateway.** Connects to every registered MCP server and offers all of their tools on one endpoint, `/mcp`. It also owns users, roles, API keys, tool permissions and the audit log.
+- **Dashboard.** The React app for admins and members: servers and their status, team and keys, audit log, permissions, stores and chat.
+- **Chat agent.** An LLM chooses tools, and the gateway runs them as the logged-in user, through the same `/mcp` endpoint an external client uses.
+- **Provisioner (bonus).** Creates and deletes extra stores from the dashboard, each in its own namespace, and registers each store's MCP server automatically.
 
-## Local setup
+How the pieces connect, and why they are built this way, is in [`docs/DESIGN.md`](docs/DESIGN.md). What can go wrong, and what stops it, is in [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
-Requirements: Docker (Docker Desktop or OrbStack, with about 6 GB of memory available), `k3d` 5.9+, `kubectl`, `helm` 4, Node 22 and `pnpm` 9.
+## Where to find each deliverable
+
+| The brief asks for                                        | Where                                                                                                                                                                        |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local setup                                               | [Run it locally](#run-it-locally)                                                                                                                                            |
+| VPS or production-like setup                              | [Deploy to a VPS](#deploy-to-a-vps-k3s)                                                                                                                                      |
+| Place an order, connect an MCP client, use the chat agent | [Demo walkthrough](#demo-walkthrough)                                                                                                                                        |
+| Source code                                               | [`apps/dashboard`](apps/dashboard), [`apps/gateway`](apps/gateway), [`apps/woo-mcp`](apps/woo-mcp); chat agent in [`apps/gateway/src/agent.ts`](apps/gateway/src/agent.ts)   |
+| Helm charts, local and production values                  | [`charts/store`](charts/store), [`charts/platform`](charts/platform), [`charts/demo-upstreams`](charts/demo-upstreams), each with `values-local.yaml` and `values-prod.yaml` |
+| System design and tradeoffs                               | [`docs/DESIGN.md`](docs/DESIGN.md)                                                                                                                                           |
+| Threat model                                              | [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md)                                                                                                                               |
+| Bonus and stand-out items attempted                       | [Beyond the brief](#beyond-the-brief)                                                                                                                                        |
+
+## Run it locally
+
+You need Docker (Docker Desktop or OrbStack, with about 6 GB of memory), `k3d` 5.9+, `kubectl`, `helm` 4, Node 22 and `pnpm` 9.
 
 ```bash
 pnpm install
-make cluster-up     # k3d cluster "urumi": k3s v1.36.5, ports 80/443 on localhost
-make deploy-local   # build images, import them into k3d, install store, demo-upstreams and platform
-make e2e            # end-to-end checks of the whole definition of done
+make cluster-up     # k3d cluster "urumi" with ports 80/443 on localhost
+make deploy-local   # build the images, load them into k3d, install all three charts
+make e2e            # check the whole definition of done end to end
 ```
 
-The first deploy takes about 4 minutes, most of it image builds and the WooCommerce download.
+The first deploy takes about 4 minutes, mostly image builds and the WooCommerce download.
 
-### URLs and credentials
+| What              | URL                                    | Login               |
+| ----------------- | -------------------------------------- | ------------------- |
+| Storefront        | http://store.127.0.0.1.nip.io          | none                |
+| WooCommerce admin | http://store.127.0.0.1.nip.io/wp-admin | `admin`             |
+| Dashboard         | http://app.127.0.0.1.nip.io            | `admin@urumi.local` |
+| MCP endpoint      | http://app.127.0.0.1.nip.io/mcp        | an API key          |
 
-| What              | Where                                                                                                                                                       |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Storefront        | http://store.127.0.0.1.nip.io                                                                                                                               |
-| WooCommerce admin | http://store.127.0.0.1.nip.io/wp-admin, user `admin`, password: `kubectl -n store get secret wordpress -o jsonpath='{.data.admin-password}' \| base64 -d`   |
-| Dashboard         | http://app.127.0.0.1.nip.io, user `admin@urumi.local`, password: `kubectl -n platform get secret gateway -o jsonpath='{.data.admin-password}' \| base64 -d` |
-| MCP endpoint      | http://app.127.0.0.1.nip.io/mcp                                                                                                                             |
+Helm generates every password and key on first install, stores them in Kubernetes Secrets and reuses them on upgrades. Read the two admin passwords with:
 
-All passwords and keys are generated by Helm on first install, kept in Kubernetes Secrets, and reused on upgrades.
+```bash
+kubectl -n store get secret wordpress -o jsonpath='{.data.admin-password}' | base64 -d   # WooCommerce
+kubectl -n platform get secret gateway -o jsonpath='{.data.admin-password}' | base64 -d  # dashboard
+```
 
-### Local domain approach
+**Local hostnames.** `nip.io` is a public wildcard DNS service: any name ending in `.127.0.0.1.nip.io` resolves to `127.0.0.1`. k3d forwards ports 80 and 443 on localhost to Traefik, which routes by hostname. No `/etc/hosts` edits are needed, and every new store gets a working hostname. Without internet DNS, add the hosts to `/etc/hosts` pointing at `127.0.0.1`.
 
-The local hostnames use `nip.io`, a public wildcard DNS service: `<anything>.127.0.0.1.nip.io` resolves to `127.0.0.1`. k3d maps ports 80/443 on localhost to Traefik, which routes by host. This needs no `/etc/hosts` edits and works for any number of hosts. If there is no internet DNS, add the two hosts to `/etc/hosts` pointing at `127.0.0.1`.
-
-### Chat agent model
-
-The chat agent needs an LLM API key. Locally, `values-local.yaml` uses OpenRouter (OpenAI-compatible, model `google/gemini-2.5-flash`). Put the key in a gitignored file and deploy:
+**Chat agent model.** The chat agent needs an LLM API key. Locally it uses OpenRouter with `google/gemini-2.5-flash`. Put the key in a gitignored file and redeploy:
 
 ```bash
 printf 'llm:\n  apiKey: "<openrouter key>"\n' > charts/platform/values-secrets.local.yaml
 make deploy-platform
 ```
 
-`values-prod.yaml` uses Google's Gemini API directly (`llm.provider: gemini`). Any OpenAI-compatible endpoint works: set `llm.provider: openai-compatible`, `llm.baseUrl`, `llm.model` and `llm.apiKey`. The key is stored in Secret `platform/gateway` and never leaves the gateway.
+Production values use Google's Gemini API directly. Any OpenAI-compatible endpoint works too (`llm.provider: openai-compatible`, plus `llm.baseUrl`, `llm.model` and `llm.apiKey`). The key is stored in Secret `platform/gateway` and never leaves the gateway.
 
-## Usage
+## Demo walkthrough
 
-### Place an order
+This follows the brief's definition of done, with an admin (user A) and a member (user B).
+
+### 1. Place an order
 
 1. Open http://store.127.0.0.1.nip.io/shop/ and add a product to the cart.
-2. Check out. Fill in any address and choose **Cash on delivery**.
-3. In WooCommerce admin, the order appears under **WooCommerce → Orders** with status _Processing_.
+2. Check out with any address and choose **Cash on delivery**.
+3. In WooCommerce admin, the order is under **WooCommerce → Orders** with status _Processing_.
 
-### Invite a member and get an API key
+### 2. Invite a member and give them a key
 
-1. Log in to the dashboard as admin. Open **Team**, invite a member, and send them the single-use invite link.
-2. The member opens the link, sets a password, then opens **My API keys** → **Generate key**. The key is shown once, together with ready-to-paste client configuration.
+1. As admin, open **Team**, invite a member and send them the single-use invite link.
+2. The member opens the link, sets a password, then opens **My API keys** and selects **Generate key**. The key is shown once, with client configuration ready to paste.
 
-Admins can also issue and revoke keys for any member from the Team page.
+Admins can also issue and revoke keys for any member on the Team page.
 
-### Connect an external MCP client
+### 3. Connect an MCP client
 
 Claude Code:
 
@@ -125,7 +118,7 @@ claude mcp add --transport http urumi http://app.127.0.0.1.nip.io/mcp \
   --header "Authorization: Bearer urk_..."
 ```
 
-Cursor or any client that reads `.mcp.json`:
+Cursor, or any client that reads `.mcp.json`:
 
 ```json
 {
@@ -139,114 +132,99 @@ Cursor or any client that reads `.mcp.json`:
 }
 ```
 
-MCP Inspector: `npx @modelcontextprotocol/inspector`, transport _Streamable HTTP_, URL as above, header `Authorization: Bearer urk_...`.
+MCP Inspector: run `npx @modelcontextprotocol/inspector`, choose _Streamable HTTP_, and use the same URL and header.
 
-The client sees every enabled server's tools as `<server>__<tool>`, for example `woo__list_orders`, `everything-a__echo` and `everything-b__echo`. Example prompts:
+The client sees every enabled server's tools, named `<server>__<tool>`: for example `woo__list_orders`, `everything-a__echo` and `everything-b__echo`. The prefix keeps two servers' tools apart even when they share a name. Try:
 
 - "What orders came in today?"
-- "Find today's orders and add up their totals with the everything get-sum tool" (uses two upstreams).
+- "Find today's orders and add up their totals with the everything get-sum tool." This needs two different servers.
 
-### Use the chat agent
+### 4. Use the chat agent
 
-Open **Chat** in the dashboard and ask, for example, "Create a product called Demo Hoodie priced at 999", then "What orders came in today?". Every tool call appears as a card with its arguments, result and duration. The agent calls tools through the gateway's own `/mcp` endpoint as the logged-in user, so its calls appear in the audit log under that user with `via = chat`.
+Open **Chat** in the dashboard and ask, for example, "Create a product called Demo Hoodie priced at 999", then "What orders came in today?". Each tool call appears as a card with its arguments, result and duration. The agent calls tools as the logged-in user, so the audit log lists those calls under that user, marked `via = chat`.
 
-### Create more stores (multi-store)
+### 5. Manage servers and watch failures
 
-Open **Stores**, enter a name, and press **Create store**.
+**Servers** lists each server's status (Connected, Unreachable or Disabled), its last error and its tools. Admins can add, edit, disable or remove servers. A server needs a Streamable HTTP URL and, optionally, a bearer token or a custom header. Credentials are write-only: nobody can read them back.
 
-- The provisioner installs a complete store (WordPress, MariaDB, bootstrap Job, woo-mcp) as Helm release `store-<name>` in its own namespace, with a ResourceQuota and LimitRange.
-- The store gets its own host: `http://<name>-shop.127.0.0.1.nip.io`.
-- Once it is ready, its MCP server is registered in the gateway automatically, with tools named `store-<name>__list_orders` and so on.
-- **Delete** removes the MCP registration, the release and the namespace, including the store's volumes and Secrets.
-- Each user may own up to `provisioner.maxStoresPerUser` stores (default 2).
-- A failed store can be retried.
+- **Disable** a server: its tools disappear from connected clients and from the chat agent.
+- **Kill** an upstream's pod with `kubectl -n demo-upstreams delete pod -l app.kubernetes.io/name=everything`: the other servers keep working, and the dashboard shows it as Unreachable until Kubernetes replaces the pod.
+- **Revoke** a key: the next call with it is rejected, even inside an open session.
+- **Audit**: every call above appears on the Audit page under the user who made it.
 
-`make e2e-stores` runs the whole flow:
+To add a remote server, for example GitHub's: URL `https://api.githubcopilot.com/mcp/x/issues`, credential type _Bearer token_, and a GitHub token.
 
-1. Creates two stores in parallel.
-2. Checks that both are ready and registered.
-3. Checks cross-store isolation, the guardrails and the provisioner's permission limits.
-4. Deletes one store and checks that its tools and namespace are gone.
+### 6. Create more stores
 
-### Manage servers
+Open **Stores**, enter a name and select **Create store**. The provisioner installs a complete store (WordPress, MariaDB, setup Job, woo-mcp) in its own namespace, `store-<name>`, with resource quotas. The store gets its own address, `http://<name>-shop.127.0.0.1.nip.io`. When it is ready, its tools appear for everyone as `store-<name>__list_orders` and so on.
 
-On **Servers**, admins see each server's status (Connected / Unreachable / Disabled), last error and tools, and can add, edit, disable or remove servers. A server needs a Streamable HTTP URL and an optional credential (bearer token or custom header). Credentials are write-only.
+**Delete** removes the store's tools first, then its release, namespace, volumes and Secrets. Each user can own up to two stores by default (`provisioner.maxStoresPerUser`), and a failed store can be retried. `make e2e-stores` runs the whole flow, including isolation between stores and the provisioner's permission limits.
 
-Example: add GitHub's remote MCP server with URL `https://api.githubcopilot.com/mcp/x/issues`, credential type _Bearer token_, and a GitHub token.
+## Deploy to a VPS (k3s)
 
-## Production-like setup (k3s VPS)
+The same charts deploy to a single k3s node; only values change. The production values were verified end to end on local k3s with real TLS from cert-manager: certificates issued, HTTP redirected to HTTPS, `Secure` cookies, and WooCommerce calls through woo-mcp behind TLS termination. They have not been deployed to a public VM.
 
-The same charts deploy to a single k3s node, with values changes only. The production values were verified end to end on the local k3s with TLS from cert-manager: certificates issued, HTTP redirected to HTTPS, `Secure` cookies, and WooCommerce calls through woo-mcp behind TLS termination. They have not been deployed to a public VM. `values-prod.yaml` is sized for a small ARM VM: 1 core and 6 GB, for example Oracle Cloud's Always Free `VM.Standard.A1.Flex`. Open TCP 22, 80 and 443 in the cloud firewall. The Kubernetes API stays private and is reached through an SSH tunnel.
+`values-prod.yaml` is sized for a small ARM VM with 1 core and 6 GB, for example Oracle Cloud's Always Free `VM.Standard.A1.Flex`. Open TCP 22, 80 and 443 in the cloud firewall. The Kubernetes API stays private and is reached through an SSH tunnel.
 
-1. **Prepare the VM** from your machine. This fixes the host firewall, installs k3s (same version as local) and cert-manager, and writes a kubeconfig:
+1. **Prepare the VM.** This opens the host firewall, installs k3s (the same version as local) and cert-manager, and writes a kubeconfig.
    ```bash
    make vps-setup VPS=ubuntu@<vm-ip>
-   make vps-tunnel VPS=ubuntu@<vm-ip>           # keep running in a second terminal
+   make vps-tunnel VPS=ubuntu@<vm-ip>      # keep running in a second terminal
    export KUBECONFIG=~/.kube/urumi-vps.yaml
    sed 's/admin@example.com/<your email>/' scripts/vps/cluster-issuer.yaml | kubectl apply -f -
    ```
-   Oracle's Ubuntu images reject all inbound traffic except SSH, and also forwarded traffic, at the host firewall. `scripts/vps/prepare-host.sh` opens 80/443 and removes the forward-reject rule, which would otherwise break pod networking.
-2. **Images.** Either stream them over SSH, with no registry and arm64 built locally:
+   Oracle's Ubuntu images block inbound and forwarded traffic at the host firewall. `scripts/vps/prepare-host.sh` opens 80/443 and removes the forwarding rule that would otherwise break pod networking.
+2. **Images.** Stream locally built arm64 images over SSH with `make images && make vps-images VPS=ubuntu@<vm-ip>`, or push multi-arch images to a registry with `make push REGISTRY=ghcr.io/<user>/urumi`.
+3. **Secrets.** Put the LLM settings in `charts/platform/values-secrets.prod.yaml` (gitignored). The cluster generates every other secret.
+4. **Deploy.** `<vm-ip>.sslip.io` needs no DNS setup:
    ```bash
-   make images && make vps-images VPS=ubuntu@<vm-ip>
+   make deploy-prod REGISTRY=urumi DOMAIN=<vm-ip>.sslip.io   # or REGISTRY=ghcr.io/<user>/urumi
    ```
-   or push multi-arch images to a registry (`make push REGISTRY=ghcr.io/<user>/urumi`) and use that registry below.
-3. **Secrets.** Put the LLM settings in `charts/platform/values-secrets.prod.yaml` (gitignored), for example `llm.provider`, `llm.baseUrl`, `llm.model` and `llm.apiKey`. Everything else is generated in the cluster.
-4. **DNS and deploy.** `<vm-ip>.sslip.io` needs no DNS setup:
-   ```bash
-   make deploy-prod REGISTRY=urumi DOMAIN=<vm-ip>.sslip.io     # or REGISTRY=ghcr.io/<user>/urumi
-   ```
-   The storefront is at `https://store.<vm-ip>.sslip.io` and the dashboard at `https://app.<vm-ip>.sslip.io`, with Let's Encrypt certificates.
+   The store is at `https://store.<vm-ip>.sslip.io` and the dashboard at `https://app.<vm-ip>.sslip.io`, with Let's Encrypt certificates.
 
-What changes between `values-local.yaml` and `values-prod.yaml`:
+What differs between `values-local.yaml` and `values-prod.yaml`:
 
-| Concern   | Local                                             | Production                                                                                                           |
-| --------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Domain    | `127.0.0.1.nip.io`                                | `--set global.domain=<domain>`                                                                                       |
-| TLS       | off                                               | on: cert-manager `letsencrypt-prod`, HTTP-01 through Traefik; plain HTTP redirects to HTTPS; cookies become `Secure` |
-| Images    | built locally, imported into k3d                  | streamed into the VM over SSH, or pulled from a registry (`--set *.image.repository`)                                |
-| Storage   | `local-path`, small PVCs                          | `local-path` (k3s), larger PVCs; swap the class for a cloud CSI driver                                               |
-| Resources | small requests and limits                         | CPU requests sized for one core shared with k3s; larger PVCs                                                         |
-| Secrets   | generated by Helm; LLM key from a gitignored file | same mechanism, separate gitignored file                                                                             |
+| Concern   | Local                                           | Production                                                                  |
+| --------- | ----------------------------------------------- | --------------------------------------------------------------------------- |
+| Domain    | `127.0.0.1.nip.io`                              | `--set global.domain=<domain>`                                              |
+| TLS       | off                                             | cert-manager and Let's Encrypt; HTTP redirects to HTTPS; `Secure` cookies   |
+| Images    | built locally, loaded into k3d                  | streamed over SSH, or pulled from a registry                                |
+| Storage   | `local-path`, small volumes                     | `local-path` on k3s with larger volumes; a cloud CSI class on managed hosts |
+| Resources | small requests and limits                       | CPU requests sized for one core shared with k3s                             |
+| Secrets   | generated by Helm; LLM key in a gitignored file | same mechanism, separate gitignored file                                    |
 
-### Upgrade and roll back
+## Upgrade and roll back
 
 ```bash
 helm history store -n store
-make deploy-store                 # or: helm upgrade store charts/store -n store -f ... --set ...
+make deploy-store                  # or: helm upgrade store charts/store -n store -f ...
 helm rollback store <revision> -n store
-scripts/upgrade-rollback.sh       # scripted rehearsal: values change, verify, roll back, verify data
+scripts/upgrade-rollback.sh        # rehearsal: change values, verify, roll back, verify the data
 ```
 
-- Images are tagged with a hash of their sources, so an upgrade restarts only the components whose code changed.
-- The store's bootstrap Job also runs on rollback, so WordPress settings follow the rolled-back values.
-- Rollbacks never touch the PVCs. Products, orders, users and keys survive both directions.
-- Gateway migrations are additive, so an older gateway image runs against a newer schema.
-- Provisioned stores (`store-*`) are upgraded by the provisioner: each records the store chart version it runs, and stores behind the current chart version are upgraded when the provisioner starts. Bump `version` in `charts/store/Chart.yaml` when store templates change.
+- Image tags are hashes of each component's sources, so an upgrade restarts only what changed.
+- Rollbacks never touch the volumes. Products, orders, users and keys survive in both directions.
+- The store's setup Job also runs on rollback, so WordPress settings follow the rolled-back values.
+- Gateway database migrations only add, so an older gateway runs against a newer schema.
+- Extra stores are upgraded by the provisioner when it starts. Bump `version` in `charts/store/Chart.yaml` whenever store templates change.
 
-## Bonus and stand-out items
+## Beyond the brief
 
-Attempted from the brief's bonus and stand-out lists, with where to find each:
-
-| Item                                                                                                                                                                                                                                                                                                                                                           | Where                                                                                                                |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Tool permissions per role: hidden from the tool list, rejected and audited when called directly                                                                                                                                                                                                                                                                | `apps/gateway/src/policies.ts`, dashboard **Permissions** page                                                       |
-| Security hardening: SSRF guard, default-deny ingress and egress NetworkPolicies everywhere, non-root read-only containers for our own images, encrypted upstream credentials, no service-account tokens outside the provisioner, Pod Security `baseline` on store namespaces                                                                                   | `apps/gateway/src/ssrf.ts`, `charts/*/templates/networkpolicy.yaml`, `docs/THREAT_MODEL.md`                          |
-| Upgrades and rollback                                                                                                                                                                                                                                                                                                                                          | `scripts/upgrade-rollback.sh`, section above                                                                         |
-| **Bonus: multi-store provisioning.** Create/delete from the dashboard, a namespace, database, volumes and host per store, automatic MCP registration, NetworkPolicy isolation, ResourceQuota/LimitRange, max stores per user, safe retries and restarts, automatic upgrade on chart changes, least-privilege RBAC plus an admission policy for the provisioner | `apps/provisioner`, `charts/platform/templates/provisioner.yaml`, dashboard **Stores** page, `scripts/e2e-stores.sh` |
-| Observability: Prometheus `/metrics` (tool calls by server, outcome and channel; latency histogram per server; upstream status; open sessions), per-server calls, error rate and p50/p95 latency on the Servers page, and failure reasons in plain words ("Connection refused: nothing is listening at that address")                                          | `apps/gateway/src/metrics.ts`, `GET /api/servers/stats`, `describe()` in `apps/gateway/src/upstream.ts`              |
+- **Bonus: multi-store provisioning.** Create and delete stores from the dashboard. Each store has its own namespace, database, volumes and hostname, plus automatic MCP registration, network isolation, quotas, a per-user limit, safe retries and restarts, and automatic upgrades. The provisioner's Kubernetes permissions are limited by RBAC and an admission policy. See [`apps/provisioner`](apps/provisioner), [`charts/platform/templates/provisioner.yaml`](charts/platform/templates/provisioner.yaml) and [`scripts/e2e-stores.sh`](scripts/e2e-stores.sh).
+- **Tool permissions per role.** A denied tool is hidden from that role's tool list, and a direct call to it is rejected and audited. See [`policies.ts`](apps/gateway/src/policies.ts) and the dashboard's **Permissions** page.
+- **Security hardening.** An SSRF guard on admin-entered URLs, default-deny NetworkPolicies in every namespace, non-root read-only containers for our images, encrypted upstream credentials, no service-account tokens outside the provisioner, and Pod Security `baseline` on store namespaces. See [`ssrf.ts`](apps/gateway/src/ssrf.ts), `charts/*/templates/networkpolicy.yaml` and the [threat model](docs/THREAT_MODEL.md).
+- **Upgrades and rollback.** The rehearsal script and rules [above](#upgrade-and-roll-back).
+- **Observability.** Prometheus `/metrics` (calls by server, outcome and channel, latency per server, upstream status, open sessions), per-server error rate and p50/p95 latency on the Servers page, and failure reasons in plain words, for example "Connection refused: nothing is listening at that address". See [`metrics.ts`](apps/gateway/src/metrics.ts) and `describe()` in [`upstream.ts`](apps/gateway/src/upstream.ts).
 
 ## Development
 
 ```bash
-make check        # typecheck, lint, format check, chart tests, unit tests (gateway tests start a throwaway Postgres container)
+make check        # typecheck, lint, format, unit and chart tests (gateway tests start a throwaway Postgres)
 make helm-lint
 make e2e          # against the running local cluster
 make e2e-stores   # multi-store provisioning, several minutes
 kubectl -n platform port-forward deploy/gateway 8080:8080   # then: curl localhost:8080/metrics
 ```
-
-Repository layout:
 
 ```
 apps/
@@ -256,9 +234,9 @@ apps/
   provisioner/      reconcile loop that installs and deletes stores
 images/everything/  pinned image for the MCP reference server
 charts/
-  store/            WordPress, MariaDB, bootstrap Job, woo-mcp
+  store/            WordPress, MariaDB, setup Job, woo-mcp
   platform/         gateway, dashboard, Postgres, provisioner
   demo-upstreams/   in-cluster third-party MCP servers
-docs/               design and threat model
+docs/               design, threat model, diagram sources
 scripts/            k3d config, chart tests, e2e checks, upgrade rehearsal, VPS setup
 ```

@@ -1,0 +1,50 @@
+// Detailed architecture: namespaces and connections. Render as: cloud-architecture-diagram
+direction right
+typeface clean
+
+Shopper [icon: shopping-cart, color: gray]
+Team [icon: users, color: gray, label: "Admins and members (browser)"]
+Client [icon: terminal, color: gray, label: "MCP client (Claude Code, Cursor, Inspector)"]
+
+Cluster [icon: k8s-kubernetes, color: blue, label: "Kubernetes cluster (k3d locally, k3s on a VPS)"] {
+  Traefik [icon: traefik, label: "Traefik Ingress"]
+
+  Platform [icon: k8s-ns, color: purple, label: "namespace: platform"] {
+    Dashboard [icon: react, label: "Dashboard (React)"]
+    Gateway [icon: node, label: "Gateway: API, /mcp, chat agent"]
+    Postgres [icon: postgres, label: "Postgres: users, keys, servers, audit"]
+    Provisioner [icon: helm, label: "Provisioner"]
+  }
+
+  Store [icon: k8s-ns, color: green, label: "namespace: store"] {
+    WordPress [icon: woocommerce, label: "WooCommerce on WordPress"]
+    MariaDB [icon: mariadb]
+    WooMcp [icon: node, label: "woo-mcp (our MCP server)"]
+  }
+
+  MoreStores [icon: k8s-ns, color: green, label: "store-* namespaces (one per extra store, same chart)"]
+
+  Demo [icon: k8s-ns, color: orange, label: "namespace: demo-upstreams"] {
+    Everything [icon: tool, label: "everything (reference MCP server)"]
+  }
+}
+
+Remote [icon: github, color: gray, label: "Remote MCP servers (e.g. GitHub)"]
+LLM [icon: gemini, color: gray, label: "LLM (Gemini or OpenAI-compatible)"]
+
+Shopper > Traefik: store host
+Team > Traefik: app host
+Client > Traefik: app host /mcp + API key
+Traefik > WordPress
+Traefik > Dashboard
+Traefik > Gateway
+Gateway > Postgres
+Gateway > WooMcp: MCP + bearer token
+Gateway > Everything: MCP
+Gateway > MoreStores: MCP
+Gateway > Remote: MCP + token
+Gateway > LLM: tool calling
+WooMcp > WordPress: REST API with signed requests
+WordPress > MariaDB
+Provisioner > MoreStores: helm install / uninstall
+Provisioner > Gateway: register store servers

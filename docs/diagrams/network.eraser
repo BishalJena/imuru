@@ -1,0 +1,46 @@
+// Public entry points and the only internal paths NetworkPolicies allow. Render as: cloud-architecture-diagram
+direction right
+typeface clean
+
+Internet [icon: globe, color: gray]
+
+Cluster [icon: k8s-kubernetes, color: blue, label: "Cluster: every namespace denies all traffic by default"] {
+  Traefik [icon: traefik, label: "Traefik (kube-system)"]
+  KubeApi [icon: k8s-api, label: "Kubernetes API"]
+
+  Platform [icon: k8s-ns, color: purple, label: "platform"] {
+    Dashboard [icon: react]
+    Gateway [icon: node]
+    Postgres [icon: postgres]
+    Provisioner [icon: helm]
+  }
+
+  Store [icon: k8s-ns, color: green, label: "store (and each store-* namespace)"] {
+    WordPress [icon: woocommerce, label: "WordPress"]
+    MariaDB [icon: mariadb]
+    WooMcp [icon: node, label: "woo-mcp"]
+  }
+
+  Demo [icon: k8s-ns, color: orange, label: "demo-upstreams"] {
+    Everything [icon: tool, label: "everything"]
+  }
+
+  OtherPod [icon: k8s-pod, color: red, label: "any other pod"]
+}
+
+PublicApis [icon: cloud, color: gray, label: "Public addresses only: LLM, remote MCP"]
+
+Internet > Traefik: only the store host and the app host
+Traefik > WordPress
+Traefik > Dashboard
+Traefik > Gateway: /api and /mcp
+WordPress > MariaDB
+WooMcp > WordPress
+Gateway > Postgres
+Gateway > WooMcp: plus a bearer token
+Gateway > Everything
+Gateway > PublicApis: private ranges excluded
+Provisioner > Gateway: /internal plus a shared token
+Provisioner > KubeApi: RBAC limited to store-* namespaces
+OtherPod --> WooMcp: blocked [color: red]
+Gateway --> KubeApi: blocked [color: red]

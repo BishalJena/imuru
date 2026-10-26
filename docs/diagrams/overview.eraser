@@ -1,0 +1,26 @@
+// The system at a glance (README). Render as: cloud-architecture-diagram
+direction right
+typeface clean
+
+People [color: gray, label: "People"] {
+  Team [icon: users, label: "Team: dashboard and chat"]
+  Client [icon: terminal, label: "MCP clients: Claude Code, Cursor"]
+  Shopper [icon: shopping-cart, label: "Shoppers"]
+}
+
+Cluster [icon: k8s-kubernetes, color: blue, label: "Kubernetes (same Helm charts locally and on a VPS)"] {
+  Gateway [icon: shield, color: purple, label: "Gateway: one MCP endpoint, keys, roles, audit log"]
+  WooMcp [icon: node, color: green, label: "woo-mcp: products and orders as tools"]
+  Store [icon: woocommerce, color: green, label: "WooCommerce store"]
+}
+
+Others [icon: server, color: orange, label: "Other MCP servers"]
+LLM [icon: gemini, color: gray, label: "LLM for the chat agent"]
+
+Team > Gateway: log in
+Client > Gateway: one URL + personal API key
+Shopper > Store: shop and check out
+Gateway > WooMcp: gateway's own credential
+WooMcp > Store: REST API
+Gateway > Others: gateway's own credentials
+Gateway > LLM: tool calling

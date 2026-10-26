@@ -1,0 +1,26 @@
+// The dashboard chat agent. Render as: sequence-diagram
+typeface clean
+
+Browser [icon: monitor, color: gray, label: "Dashboard (browser)"]
+Chat [icon: message-square, color: purple, label: "Gateway: /api/chat"]
+Mcp [icon: node, color: purple, label: "Gateway: /mcp"]
+LLM [icon: gemini, color: blue, label: "LLM"]
+Upstreams [icon: server, color: green, label: "Upstream MCP servers"]
+
+Browser > Chat: question, with the dashboard session cookie
+activate Chat
+Chat > Chat: mint a short-lived token for this user
+Chat > Mcp: connect as the user, tools/list
+Mcp --> Chat: only the tools this user may call
+loop [label: "until the model answers, at most 8 steps", color: blue] {
+  Chat > LLM: conversation + tool list
+  LLM --> Chat: tool calls
+  Chat > Mcp: tools/call, as the user
+  Mcp > Upstreams: routed call
+  Upstreams --> Mcp: result
+  Mcp --> Chat: result, audited under the user with via = chat
+  Chat --> Browser: tool_call and tool_result events
+}
+LLM --> Chat: final answer
+Chat --> Browser: message event
+deactivate Chat
