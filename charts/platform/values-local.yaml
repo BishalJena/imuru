@@ -5,8 +5,11 @@ global:
     enabled: false
 
 # Chat model through OpenRouter (OpenAI-compatible). The key goes in the
-# gitignored values-secrets.local.yaml as llm.apiKey.
+# gitignored values-secrets.local.yaml as llm.apiKey. A free model, so local
+# runs cost nothing; free models are rate-limited and can be withdrawn, and
+# cohere/north-mini-code:free or nvidia/nemotron-3-ultra-550b-a55b:free are
+# drop-in alternatives.
 llm:
   provider: openai-compatible
   baseUrl: https://openrouter.ai/api/v1
-  model: google/gemini-2.5-flash
+  model: nvidia/nemotron-3.5-lightning:free

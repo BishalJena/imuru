@@ -83,7 +83,7 @@ kubectl -n platform get secret gateway -o jsonpath='{.data.admin-password}' | ba
 
 **Local hostnames.** `nip.io` is a public wildcard DNS service: any name ending in `.127.0.0.1.nip.io` resolves to `127.0.0.1`. k3d forwards ports 80 and 443 on localhost to Traefik, which routes by hostname. No `/etc/hosts` edits are needed, and every new store gets a working hostname. Without internet DNS, add the hosts to `/etc/hosts` pointing at `127.0.0.1`.
 
-**Chat agent model.** The chat agent needs an LLM API key. Locally it uses OpenRouter with `google/gemini-2.5-flash`. Put the key in a gitignored file and redeploy:
+**Chat agent model.** The chat agent needs an LLM API key. Locally it uses a free OpenRouter model, `nvidia/nemotron-3.5-lightning:free`, so a key with no credit works. Free models are rate-limited and can be withdrawn; `cohere/north-mini-code:free` and `nvidia/nemotron-3-ultra-550b-a55b:free` are drop-in alternatives through `llm.model`. Put the key in a gitignored file and redeploy:
 
 ```bash
 printf 'llm:\n  apiKey: "<openrouter key>"\n' > charts/platform/values-secrets.local.yaml
