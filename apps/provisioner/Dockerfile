@@ -15,10 +15,13 @@ ARG TARGETARCH
 ARG HELM_VERSION=v4.3.0
 ARG HELM_SHA256_amd64=86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb
 ARG HELM_SHA256_arm64=31c5794dd55c66a51e6b7d2e2ac7a114ae8b1de41ff1d9ba51748ac973b06a08
-RUN wget -q -O /tmp/helm.tgz "https://get.helm.sh/helm-${HELM_VERSION}-linux-${TARGETARCH}.tar.gz" \
- && eval "expected=\$HELM_SHA256_${TARGETARCH}" \
+# Only BuildKit sets TARGETARCH; the legacy builder leaves it empty, so fall
+# back to the architecture of the build container.
+RUN arch="${TARGETARCH:-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')}" \
+ && wget -q -O /tmp/helm.tgz "https://get.helm.sh/helm-${HELM_VERSION}-linux-${arch}.tar.gz" \
+ && eval "expected=\$HELM_SHA256_${arch}" \
  && echo "${expected}  /tmp/helm.tgz" | sha256sum -c - \
- && tar -xzf /tmp/helm.tgz -C /tmp && mv /tmp/linux-${TARGETARCH}/helm /usr/local/bin/helm
+ && tar -xzf /tmp/helm.tgz -C /tmp && mv /tmp/linux-${arch}/helm /usr/local/bin/helm
 
 FROM node:22.23.3-alpine3.24
 ENV NODE_ENV=production
